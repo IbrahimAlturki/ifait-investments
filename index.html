@@ -330,24 +330,18 @@ const {
 
 const KEY_MAIN = "portfolio:v1:holdings-and-settings";
 const KEY_SNAPS = "portfolio:v1:snapshots";
-
-/* Browsers refuse to let a file opened from storage save anything —
-   file:// counts as an opaque origin and localStorage throws. So we
-   check once, and if saving is impossible we run from memory and say
-   so, rather than silently forgetting everything. */
 let STORAGE_OK = true;
 try {
   localStorage.setItem('__probe__', '1');
   localStorage.removeItem('__probe__');
 } catch {
   STORAGE_OK = false;
-  window.__STORAGE_NOTE__ = 'This file was opened straight from your device, and browsers block ' + 'saving in that case. Put it at a web address and it will remember ' + 'everything.';
+  window.__STORAGE_NOTE__ = 'This file was opened straight from your device, and browsers block ' + 'saving in that case. Put it at a web address and it will remember everything.';
 }
 const memory = {};
 async function loadKey(key, fallback) {
   if (!STORAGE_OK) {
     if (memory[key] !== undefined) return memory[key];
-    // Show the real portfolio rather than an empty screen.
     return key === KEY_MAIN ? {
       holdings: myPortfolio(),
       usdRate: 3.75
@@ -383,6 +377,12 @@ const sar = (n, sign = false) => {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
   const p = sign && n > 0 ? "+" : "";
   return p + Math.round(n).toLocaleString("en-US");
+};
+
+// لون حسب الاتجاه: أخضر للربح، أحمر للخسارة، رمادي للثبات
+const tone = n => {
+  if (n === null || n === undefined || Number.isNaN(n) || Math.abs(n) < 0.005) return "#69707D";
+  return n > 0 ? "#1F6F5C" : "#B24A38";
 };
 const pct = (n, sign = true) => {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
@@ -508,8 +508,7 @@ const cashLine = (label, bucket, valueSar) => ({
 /* ------------------------------------------------------------------ */
 
 function myPortfolio() {
-  // Deliberately empty. This copy is published on the open web, so it
-  // carries no figures. Use Settings > Paste data in to load yours.
+  // Deliberately empty: this copy is published on the open web.
   return [];
 }
 
@@ -517,11 +516,6 @@ function myPortfolio() {
 /*  price refresh — routed through Claude with web search, because     */
 /*  most market APIs block browser requests outright                   */
 /* ------------------------------------------------------------------ */
-
-/* Browsers can't call market APIs directly, but they can read a file
-   sitting next to them. GitHub fetches the prices once a day and commits
-   prices.json here — so this is a same-origin read, which is always
-   allowed, and needs no API key. */
 
 const priceKey = h => h.market + ':' + h.symbol;
 async function fetchPrices(autoHoldings) {
@@ -533,9 +527,8 @@ async function fetchPrices(autoHoldings) {
       window.__PRICES_UPDATED__ = data.updated;
       return data.prices;
     }
-    throw new Error('prices.json was empty');
+    throw new Error('prices.json empty');
   } catch (err) {
-    // No prices.json yet: crypto at least is reachable from a browser.
     const coins = autoHoldings.filter(h => h.market === 'crypto');
     if (!coins.length) throw new Error('no prices.json yet (' + err.message + ')');
     const ids = [...new Set(coins.map(h => h.symbol))].join(',');
@@ -621,6 +614,8 @@ function Portfolio() {
   const [progress, setProgress] = useState(null);
   const [repaired, setRepaired] = useState(0);
   const [pasted, setPasted] = useState("");
+  const [depositing, setDepositing] = useState(false);
+  const [quick, setQuick] = useState(false);
   const [toast, setToast] = useState(null);
   const [view, setView] = useState("holdings");
   const flash = useCallback(msg => {
@@ -668,17 +663,27 @@ function Portfolio() {
   useEffect(() => {
     if (!ready || holdings.length === 0 || total <= 0) return;
     const d = today();
+    const byBucket = {};
+    const items = {};
+    for (const h of holdings) {
+      const b = h.bucket || "Other";
+      const v = holdingValue(h, usdRate);
+      byBucket[b] = Math.round((byBucket[b] || 0) + v);
+      items[h.id] = Math.round(v);
+    }
     setSnaps(prev => {
       const rest = prev.filter(s => s.date !== d);
       const next = [...rest, {
         date: d,
-        total
+        total,
+        buckets: byBucket,
+        items
       }].sort((a, b) => a.date < b.date ? -1 : 1);
       const trimmed = next.slice(-400);
       saveKey(KEY_SNAPS, trimmed);
       return trimmed;
     });
-  }, [ready, total, holdings.length]);
+  }, [ready, total, holdings, usdRate]);
 
   /* Pull prices once when the app opens. Nothing to tap. */
   const autoPulled = React.useRef(false);
@@ -765,7 +770,7 @@ function Portfolio() {
       if (rejected.length) {
         flash(`Updated ${hits}. Ignored an odd price for ${[...new Set(rejected)].join(", ")} — ` + `looked like the wrong currency.`);
       } else {
-        flash(`Updated ${hits} crypto holding${hits === 1 ? "" : "s"}. Stocks and ETFs keep the price you last entered.`);
+        flash(`Updated ${hits} holding${hits === 1 ? "" : "s"} from ${uniqueCount} lookups.` + (hits < auto.length ? " The rest kept their previous price." : ""));
       }
     } catch (e) {
       if (!quiet) {
@@ -777,6 +782,35 @@ function Portfolio() {
     }
   };
   refreshRef.current = refresh;
+
+  /* إيداع جديد في تمرا: نوزعه على الصناديق الست حسب أوزانها اليوم،
+     ونحسب كم وحدة يشتري بسعر اليوم. بعدها يتسعّر يومياً لحاله. */
+  const applyDeposit = amountSar => {
+    const etfs = holdings.filter(h => h.bucket === "Tamra" && h.mode === "auto");
+    const priced = etfs.filter(h => Number(h.lastPrice) > 0);
+    if (!priced.length) {
+      flash("حدّث الأسعار أول، بعدها أضف الإيداع.");
+      return;
+    }
+    const total = priced.reduce((s, h) => s + holdingValue(h, usdRate), 0);
+    if (total <= 0) {
+      flash("ما فيه قيمة حالية لتمرا — سوّ مزامنة أول.");
+      return;
+    }
+    setHoldings(prev => prev.map(h => {
+      if (h.bucket !== "Tamra" || h.mode !== "auto" || !Number(h.lastPrice)) return h;
+      const weight = holdingValue(h, usdRate) / total;
+      const share = amountSar * weight;
+      const priceSar = Number(h.lastPrice) * (h.currency === "USD" ? usdRate : 1);
+      return {
+        ...h,
+        quantity: Number(h.quantity) + share / priceSar,
+        costBasis: (Number(h.costBasis) || 0) + share
+      };
+    }));
+    setDepositing(false);
+    flash(`أضفنا ${sar(amountSar)} ريال على تمرا — انقسمت على الصناديق الست.`);
+  };
   const applySync = updates => {
     setHoldings(prev => prev.map(h => updates[h.id] ? {
       ...h,
@@ -789,6 +823,38 @@ function Portfolio() {
   const reportText = () => {
     const lines = [`Portfolio — ${today()}`, `Total: ${sar(total)} SAR`, weekAgo ? `Week: ${sar(change, true)} SAR (${pct(changePct)})` : "", "", ...groups.flatMap(g => [`${g.name} — ${sar(g.total)} SAR`, ...g.items.map(i => `   ${i.label}: ${sar(i._v)}`)])].filter(Boolean);
     return lines.join("\n");
+  };
+
+  /* ملف CSV لكل التاريخ المحفوظ — للتحليل في Excel أو Numbers */
+  const exportCsv = () => {
+    if (!snaps.length) return flash("ما فيه تاريخ محفوظ بعد.");
+    const cols = [...new Set(snaps.flatMap(s => Object.keys(s.buckets || {})))];
+    const rows = [["date", "total", ...cols].join(",")];
+    for (const s of snaps) {
+      rows.push([s.date, Math.round(s.total), ...cols.map(c => s.buckets && s.buckets[c] != null ? s.buckets[c] : "")].join(","));
+    }
+    // سطر أخير: الأصول اليوم بالتفصيل
+    rows.push("");
+    rows.push("holding,bucket,quantity,price,currency,value_sar,cost_sar");
+    for (const h of holdings) {
+      const v = Math.round(holdingValue(h, usdRate));
+      const q = h.mode === "auto" ? h.quantity : h.units || "";
+      const p = h.mode === "auto" ? h.lastPrice : h.unitPrice || "";
+      rows.push([JSON.stringify(h.label), h.bucket, q, p, h.currency || "SAR", v, h.costBasis ?? ""].join(","));
+    }
+    const csv = "\uFEFF" + rows.join("\n");
+    const blob = new Blob([csv], {
+      type: "text/csv;charset=utf-8"
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `portfolio-${today()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    flash(`${snaps.length} يوم من التاريخ في ملف CSV.`);
   };
   const copyReport = async () => {
     try {
@@ -942,7 +1008,7 @@ function Portfolio() {
     className: "pf-btn pf-btn-primary",
     disabled: busy,
     onClick: () => refresh(false)
-  }, busy ? "Updating\u2026" : "Update prices"), /*#__PURE__*/React.createElement("button", {
+  }, busy ? `Fetching ${progress || ""}` : "Update prices"), /*#__PURE__*/React.createElement("button", {
     className: "pf-btn",
     onClick: () => setEditing({
       id: uid(),
@@ -960,6 +1026,12 @@ function Portfolio() {
     onClick: copyReport
   }, "Copy"), /*#__PURE__*/React.createElement("button", {
     className: "pf-btn",
+    onClick: exportCsv
+  }, "CSV"), /*#__PURE__*/React.createElement("button", {
+    className: "pf-btn",
+    onClick: () => setQuick(true)
+  }, "تحديث سريع"), /*#__PURE__*/React.createElement("button", {
+    className: "pf-btn",
     onClick: () => setView(view === "settings" ? "holdings" : "settings")
   }, view === "settings" ? "Done" : "Settings")), typeof window !== "undefined" && window.__STORAGE_NOTE__ && /*#__PURE__*/React.createElement("div", {
     className: "pf-warn",
@@ -972,7 +1044,10 @@ function Portfolio() {
     }
   }, window.__STORAGE_NOTE__)), repaired > 0 && /*#__PURE__*/React.createElement("div", {
     className: "pf-flag"
-  }, /*#__PURE__*/React.createElement("b", null, "Filled in ", repaired, " holding", repaired === 1 ? "" : "s", " that had no value"), /*#__PURE__*/React.createElement("div", null, "Prices came from your screenshots. Tap any line to change one.")), stale.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", null, "Filled in ", repaired, " holding", repaired === 1 ? "" : "s", " that had no value"), /*#__PURE__*/React.createElement("div", null, "Prices came from your screenshots. Tap any line to change one.")), view !== "settings" && /*#__PURE__*/React.createElement(DailyMovers, {
+    snaps: snaps,
+    holdings: holdings
+  }), stale.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "pf-flag"
   }, /*#__PURE__*/React.createElement("b", null, stale.length, " figure", stale.length === 1 ? "" : "s", " out of date"), stale.map(h => /*#__PURE__*/React.createElement("div", {
     key: h.id
@@ -1102,6 +1177,9 @@ function Portfolio() {
     className: "pf-group-name"
   }, g.name), g.name === "Tamra" && /*#__PURE__*/React.createElement("button", {
     className: "pf-mini",
+    onClick: () => setDepositing(true)
+  }, "+ إيداع"), g.name === "Tamra" && /*#__PURE__*/React.createElement("button", {
+    className: "pf-mini",
     onClick: () => setSyncing(true)
   }, tamraSync ? daysBetween(tamraSync, today()) === 0 ? "synced today" : `synced ${daysBetween(tamraSync, today())}d ago` : "sync from app"), /*#__PURE__*/React.createElement("span", {
     className: "pf-group-total"
@@ -1126,6 +1204,21 @@ function Portfolio() {
     onSave: upsert,
     onDelete: remove,
     onClose: () => setEditing(null)
+  }), quick && /*#__PURE__*/React.createElement(QuickUpdate, {
+    holdings: holdings,
+    onApply: updates => {
+      setHoldings(prev => prev.map(h => updates[h.id] !== undefined ? {
+        ...h,
+        valueSar: updates[h.id],
+        asOf: today()
+      } : h));
+      setQuick(false);
+      flash(`حدّثنا ${Object.keys(updates).length} رقم.`);
+    },
+    onClose: () => setQuick(false)
+  }), depositing && /*#__PURE__*/React.createElement(TamraDeposit, {
+    onApply: applyDeposit,
+    onClose: () => setDepositing(false)
   }), syncing && /*#__PURE__*/React.createElement(TamraSync, {
     holdings: holdings,
     usdRate: usdRate,
@@ -1154,26 +1247,153 @@ function subtitle(h, usdRate) {
 function Trend({
   snaps
 }) {
-  const pts = snaps.slice(-60);
+  // فترات مختلفة عشان تشوف النمو على مدى قصير أو طويل
+  const RANGES = [["أسبوع", 7], ["شهر", 30], ["3 شهور", 90], ["الكل", 9999]];
+  const [range, setRange] = useState(30);
+  const [picked, setPicked] = useState(null);
+  const pts = useMemo(() => {
+    if (range >= 9999) return snaps;
+    const cutoff = new Date(Date.now() - range * 86400000).toISOString().slice(0, 10);
+    const inRange = snaps.filter(s => s.date >= cutoff);
+    return inRange.length >= 2 ? inRange : snaps.slice(-2);
+  }, [snaps, range]);
+  if (pts.length < 2) return null;
   const vals = pts.map(p => p.total);
   const lo = Math.min(...vals);
   const hi = Math.max(...vals);
   const span = hi - lo || 1;
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  const shown = picked || last;
+
+  // التغير عبر الفترة المختارة
+  const change = last.total - first.total;
+  const changePct = first.total ? change / first.total * 100 : 0;
+
+  // التغير من اليوم اللي قبله للنقطة المختارة
+  const idx = pts.findIndex(p => p.date === shown.date);
+  const prev = idx > 0 ? pts[idx - 1] : null;
+  const dayChange = prev ? shown.total - prev.total : null;
+  const dayPct = prev && prev.total ? dayChange / prev.total * 100 : null;
+
+  // خط الرسم كـ SVG — أوضح من الأعمدة للنمو
+  const W = 300,
+    H = 90;
+  const x = i => i / (pts.length - 1) * W;
+  const y = v => H - (v - lo) / span * (H - 10) - 5;
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.total).toFixed(1)}`).join(" ");
+  const area = `${line} L${W},${H} L0,${H} Z`;
+  const up = change >= 0;
+  const stroke = up ? "#1F6F5C" : "#B24A38";
   return /*#__PURE__*/React.createElement("div", {
     className: "pf-card"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "pf-lbl"
-  }, "Total, last ", pts.length, " readings"), /*#__PURE__*/React.createElement("div", {
-    className: "pf-spark"
-  }, pts.map(p => /*#__PURE__*/React.createElement("div", {
-    key: p.date,
-    title: `${p.date} · ${sar(p.total)}`,
+    className: "pf-trend-top"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "pf-lbl",
     style: {
-      height: `${8 + (p.total - lo) / span * 44}px`
+      margin: 0
     }
+  }, picked ? shown.date : "الإجمالي"), /*#__PURE__*/React.createElement("div", {
+    className: "pf-trend-val"
+  }, sar(shown.total)), dayChange !== null && /*#__PURE__*/React.createElement("div", {
+    className: "pf-trend-day",
+    style: {
+      color: tone(dayChange)
+    }
+  }, sar(dayChange, true), " · ", pct(dayPct), " عن اليوم السابق")), /*#__PURE__*/React.createElement("div", {
+    className: "pf-trend-chg",
+    style: {
+      color: stroke
+    }
+  }, sar(change, true), /*#__PURE__*/React.createElement("span", null, pct(changePct)))), /*#__PURE__*/React.createElement("svg", {
+    className: "pf-svg",
+    dir: "ltr",
+    viewBox: `0 0 ${W} ${H}`,
+    preserveAspectRatio: "none",
+    onClick: e => {
+      const r = e.currentTarget.getBoundingClientRect();
+      const rel = (e.clientX - r.left) / r.width;
+      const i = Math.max(0, Math.min(pts.length - 1, Math.round(rel * (pts.length - 1))));
+      setPicked(pts[i].date === (picked && picked.date) ? null : pts[i]);
+    }
+  }, /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("linearGradient", {
+    id: "pfFill",
+    x1: "0",
+    y1: "0",
+    x2: "0",
+    y2: "1"
+  }, /*#__PURE__*/React.createElement("stop", {
+    offset: "0%",
+    stopColor: stroke,
+    stopOpacity: "0.22"
+  }), /*#__PURE__*/React.createElement("stop", {
+    offset: "100%",
+    stopColor: stroke,
+    stopOpacity: "0"
+  }))), /*#__PURE__*/React.createElement("path", {
+    d: area,
+    fill: "url(#pfFill)"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: line,
+    fill: "none",
+    stroke: stroke,
+    strokeWidth: "2",
+    strokeLinejoin: "round",
+    strokeLinecap: "round",
+    vectorEffect: "non-scaling-stroke"
+  }), idx >= 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("line", {
+    x1: x(idx),
+    y1: "0",
+    x2: x(idx),
+    y2: H,
+    stroke: "#9AA3B2",
+    strokeWidth: "1",
+    strokeDasharray: "3 3",
+    vectorEffect: "non-scaling-stroke"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: x(idx),
+    cy: y(shown.total),
+    r: "3.5",
+    fill: "#fff",
+    stroke: stroke,
+    strokeWidth: "2",
+    vectorEffect: "non-scaling-stroke"
   }))), /*#__PURE__*/React.createElement("div", {
-    className: "pf-spark-ax"
-  }, /*#__PURE__*/React.createElement("span", null, pts[0].date), /*#__PURE__*/React.createElement("span", null, sar(vals[vals.length - 1]), " SAR")));
+    className: "pf-spark-ax",
+    dir: "ltr"
+  }, /*#__PURE__*/React.createElement("span", null, first.date), /*#__PURE__*/React.createElement("span", null, last.date)), first.buckets && last.buckets && /*#__PURE__*/React.createElement("div", {
+    className: "pf-bk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "pf-lbl"
+  }, "التغير حسب المجموعة · ", /*#__PURE__*/React.createElement("span", {
+    dir: "ltr"
+  }, first.date, " → ", last.date)), Object.keys(last.buckets).map(k => [k, last.buckets[k] - (first.buckets[k] ?? last.buckets[k])]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([k, d]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    className: "pf-bk-row"
+  }, /*#__PURE__*/React.createElement("span", null, k), /*#__PURE__*/React.createElement("span", {
+    dir: "ltr",
+    style: {
+      color: tone(d)
+    }
+  }, sar(d, true))))), /*#__PURE__*/React.createElement("div", {
+    className: "pf-seg",
+    style: {
+      marginTop: 12
+    }
+  }, RANGES.map(([label, days]) => /*#__PURE__*/React.createElement("button", {
+    key: days,
+    className: range === days ? "on" : "",
+    onClick: () => {
+      setRange(days);
+      setPicked(null);
+    }
+  }, label))), /*#__PURE__*/React.createElement("p", {
+    className: "pf-hint",
+    style: {
+      marginTop: 8
+    }
+  }, "اضغط على الرسم لتشوف أي يوم."));
 }
 
 /* ------------------------------------------------------------------ */
@@ -1336,7 +1556,7 @@ function Editor({
     onChange: e => set("lastPrice", Number(e.target.value) || 0)
   }), /*#__PURE__*/React.createElement("p", {
     className: "pf-hint"
-  }, "Crypto updates itself. For stocks and ETFs, type the price here \\u2014 a browser opened from a file is not allowed to fetch them.", h.market === "lse" && /*#__PURE__*/React.createElement(React.Fragment, null, " ", "London ETFs list twice — a dollar line around 30–70 and a pence line in the thousands. You want the dollar one."))), h.mode === "deposit" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
+  }, "Tap ", /*#__PURE__*/React.createElement("b", null, "Update prices"), " on the main screen to fill this in automatically, or type it yourself.", h.market === "lse" && /*#__PURE__*/React.createElement(React.Fragment, null, " ", "London ETFs list twice — a dollar line around 30–70 and a pence line in the thousands. You want the dollar one."))), h.mode === "deposit" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
     className: "pf-lbl"
   }, "Principal (SAR)"), /*#__PURE__*/React.createElement("input", {
     className: "pf-in",
@@ -1403,6 +1623,221 @@ function Editor({
     className: "pf-btn pf-btn-danger",
     onClick: () => onDelete(h.id)
   }, "Delete"))));
+}
+
+/* ------------------------------------------------------------------ */
+/*  اليوم — وش طلع ووش نزل من آخر مرة فتحت التطبيق                    */
+/* ------------------------------------------------------------------ */
+
+function DailyMovers({
+  snaps,
+  holdings
+}) {
+  const [open, setOpen] = useState(false);
+  if (snaps.length < 2) return null;
+  const last = snaps[snaps.length - 1];
+  const prev = snaps[snaps.length - 2];
+  if (!last.items || !prev.items) return null;
+  const byId = Object.fromEntries(holdings.map(h => [h.id, h]));
+  const rows = Object.keys(last.items).filter(id => prev.items[id] !== undefined && byId[id]).map(id => {
+    const d = last.items[id] - prev.items[id];
+    const p = prev.items[id] ? d / prev.items[id] * 100 : 0;
+    return {
+      id,
+      label: byId[id].label,
+      bucket: byId[id].bucket,
+      d,
+      p
+    };
+  }).filter(r => r.d !== 0).sort((a, b) => b.d - a.d);
+  if (!rows.length) return null;
+  const up = rows.filter(r => r.d > 0);
+  const down = rows.filter(r => r.d < 0);
+  const sumUp = up.reduce((s, r) => s + r.d, 0);
+  const sumDown = down.reduce((s, r) => s + r.d, 0);
+  const net = last.total - prev.total;
+  const days = daysBetween(prev.date, last.date);
+  const shown = open ? rows : [...up.slice(0, 3), ...down.slice(-3)];
+  return /*#__PURE__*/React.createElement("div", {
+    className: "pf-card",
+    style: {
+      marginTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "pf-mv-head"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "pf-lbl",
+    style: {
+      margin: 0
+    }
+  }, days <= 1 ? "اليوم" : `آخر ${days} أيام`, " · منذ ", /*#__PURE__*/React.createElement("span", {
+    dir: "ltr"
+  }, prev.date)), /*#__PURE__*/React.createElement("div", {
+    className: "pf-mv-net",
+    style: {
+      color: tone(net)
+    },
+    dir: "ltr"
+  }, sar(net, true), " SAR")), /*#__PURE__*/React.createElement("div", {
+    className: "pf-mv-split"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "#1F6F5C"
+    },
+    dir: "ltr"
+  }, "▲ ", sar(sumUp)), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "#B24A38"
+    },
+    dir: "ltr"
+  }, "▼ ", sar(Math.abs(sumDown))))), shown.map(r => /*#__PURE__*/React.createElement("div", {
+    key: r.id,
+    className: "pf-mv-row"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "pf-mv-lbl"
+  }, r.label, /*#__PURE__*/React.createElement("small", null, r.bucket)), /*#__PURE__*/React.createElement("span", {
+    className: "pf-mv-bar"
+  }, /*#__PURE__*/React.createElement("i", {
+    style: {
+      width: `${Math.min(100, Math.abs(r.d) / Math.max(...rows.map(x => Math.abs(x.d))) * 100)}%`,
+      background: tone(r.d),
+      marginLeft: r.d < 0 ? "auto" : 0
+    }
+  })), /*#__PURE__*/React.createElement("span", {
+    className: "pf-mv-val",
+    style: {
+      color: tone(r.d)
+    },
+    dir: "ltr"
+  }, sar(r.d, true), /*#__PURE__*/React.createElement("small", null, pct(r.p))))), rows.length > shown.length && /*#__PURE__*/React.createElement("button", {
+    className: "pf-btn-ghost",
+    style: {
+      marginTop: 6,
+      fontSize: 12.5
+    },
+    onClick: () => setOpen(true)
+  }, "عرض الكل (", rows.length, ")"), open && /*#__PURE__*/React.createElement("button", {
+    className: "pf-btn-ghost",
+    style: {
+      marginTop: 6,
+      fontSize: 12.5
+    },
+    onClick: () => setOpen(false)
+  }, "اختصار"));
+}
+
+/* ------------------------------------------------------------------ */
+/*  تحديث سريع — كل الأرقام اللي ما تتحدث لحالها في شاشة وحدة        */
+/* ------------------------------------------------------------------ */
+
+function QuickUpdate({
+  holdings,
+  onApply,
+  onClose
+}) {
+  const manual = holdings.filter(h => h.mode === "manual" && !(Number(h.units) > 0));
+  const [vals, setVals] = useState(() => Object.fromEntries(manual.map(h => [h.id, String(h.valueSar ?? "")])));
+  const changed = manual.filter(h => Number(vals[h.id]) !== Number(h.valueSar));
+  return /*#__PURE__*/React.createElement("div", {
+    className: "pf-sheet-wrap",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "pf-sheet",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "pf-sheet-head"
+  }, /*#__PURE__*/React.createElement("b", null, "تحديث سريع"), /*#__PURE__*/React.createElement("button", {
+    className: "pf-x",
+    onClick: onClose
+  }, "✕")), /*#__PURE__*/React.createElement("p", {
+    className: "pf-hint",
+    style: {
+      marginTop: 10
+    }
+  }, "هذي الأرقام ما لها مصدر تلقائي. افتح كل تطبيق وانقل الرقم. اللي ما تغيره يبقى مثل ما هو."), manual.map(h => /*#__PURE__*/React.createElement("div", {
+    key: h.id
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "pf-lbl"
+  }, h.label, /*#__PURE__*/React.createElement("span", {
+    style: {
+      textTransform: "none",
+      letterSpacing: 0,
+      fontWeight: 400
+    }
+  }, " ", "· آخر تحديث ", h.asOf ? daysBetween(h.asOf, today()) : "?", " يوم")), /*#__PURE__*/React.createElement("input", {
+    className: "pf-in",
+    inputMode: "decimal",
+    dir: "ltr",
+    value: vals[h.id],
+    onChange: e => setVals(p => ({
+      ...p,
+      [h.id]: e.target.value
+    }))
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "pf-sheet-foot"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "pf-btn pf-btn-primary",
+    disabled: !changed.length,
+    onClick: () => onApply(Object.fromEntries(changed.map(h => [h.id, Number(vals[h.id]) || 0])))
+  }, "حفظ ", changed.length ? `(${changed.length})` : ""))));
+}
+
+/* ------------------------------------------------------------------ */
+/*  إيداع تمرا                                                          */
+/* ------------------------------------------------------------------ */
+
+function TamraDeposit({
+  onApply,
+  onClose
+}) {
+  const [amount, setAmount] = useState("");
+  const n = Number(amount) || 0;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "pf-sheet-wrap",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "pf-sheet",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "pf-sheet-head"
+  }, /*#__PURE__*/React.createElement("b", null, "إيداع في تمرا"), /*#__PURE__*/React.createElement("button", {
+    className: "pf-x",
+    onClick: onClose
+  }, "✕")), /*#__PURE__*/React.createElement("p", {
+    className: "pf-hint",
+    style: {
+      marginTop: 10
+    }
+  }, "اكتب كم أودعت. نوزعه على الصناديق الست حسب أوزانها اليوم، ونحسب كم وحدة اشترى بسعر اليوم. بعدها يتحدث لحاله يومياً."), /*#__PURE__*/React.createElement("label", {
+    className: "pf-lbl"
+  }, "المبلغ (ريال)"), /*#__PURE__*/React.createElement("input", {
+    className: "pf-in",
+    inputMode: "decimal",
+    placeholder: "3000",
+    value: amount,
+    onChange: e => setAmount(e.target.value)
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginTop: 8
+    }
+  }, [1000, 3000, 5000].map(v => /*#__PURE__*/React.createElement("button", {
+    key: v,
+    className: "pf-btn",
+    style: {
+      flex: 1
+    },
+    onClick: () => setAmount(String(v))
+  }, v.toLocaleString()))), /*#__PURE__*/React.createElement("p", {
+    className: "pf-hint"
+  }, "هذا يفترض إنك أودعت اليوم بأسعار اليوم. لو الإيداع قديم، استخدم المزامنة بدلاً منه عشان تطابق رقم تمرا بالضبط."), /*#__PURE__*/React.createElement("div", {
+    className: "pf-sheet-foot"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "pf-btn pf-btn-primary",
+    disabled: n <= 0,
+    onClick: () => onApply(n)
+  }, "أضف الإيداع"))));
 }
 
 /* ------------------------------------------------------------------ */
@@ -1576,8 +2011,30 @@ function Style() {
         padding:10px 4px;font-size:12.5px;cursor:pointer;font-family:inherit;color:var(--muted);}
       .pf-seg button.on{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:600;}
       .pf-calc{margin-top:16px;padding:13px 14px;background:#F4F6F8;border-radius:7px;font-size:14px;line-height:1.6;}
-      .pf-spark{display:flex;align-items:flex-end;gap:2px;height:56px;margin-top:12px;}
-      .pf-spark div{flex:1;background:#232C42;border-radius:1px;min-width:2px;}
+      .pf-svg{width:100%;height:96px;margin-top:10px;display:block;cursor:pointer;touch-action:manipulation;}
+      .pf-trend-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+      .pf-trend-val{font:400 27px/1.1 Georgia,serif;color:var(--ink);padding-top:3px;}
+      .pf-trend-day{font-size:12px;padding-top:3px;}
+      .pf-trend-chg{text-align:right;font:600 15px/1.3 SFMono-Regular,Consolas,monospace;white-space:nowrap;}
+      .pf-trend-chg span{display:block;font-size:12.5px;font-weight:400;}
+      .pf-mv-head{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:8px;
+        border-bottom:2px solid var(--ink);margin-bottom:4px;}
+      .pf-mv-net{font:600 20px/1.2 SFMono-Regular,Consolas,monospace;padding-top:3px;}
+      .pf-mv-split{display:flex;flex-direction:column;align-items:flex-end;gap:3px;
+        font:500 12.5px/1 SFMono-Regular,Consolas,monospace;padding-top:4px;}
+      .pf-mv-row{display:grid;grid-template-columns:1.3fr 1fr auto;align-items:center;gap:10px;
+        padding:8px 0;border-bottom:1px solid var(--hair);}
+      .pf-mv-lbl{font-size:13.5px;display:flex;flex-direction:column;min-width:0;}
+      .pf-mv-lbl small{color:var(--muted);font-size:11px;}
+      .pf-mv-bar{height:6px;background:#F0F2F5;border-radius:3px;display:flex;overflow:hidden;}
+      .pf-mv-bar i{display:block;height:100%;border-radius:3px;}
+      .pf-mv-val{font:500 13px/1.2 SFMono-Regular,Consolas,monospace;text-align:right;
+        display:flex;flex-direction:column;align-items:flex-end;white-space:nowrap;}
+      .pf-mv-val small{font-size:11px;opacity:.8;}
+      .pf-bk{margin-top:14px;border-top:1px solid var(--hair);padding-top:4px;}
+      .pf-bk-row{display:flex;justify-content:space-between;padding:7px 0;
+        border-bottom:1px solid var(--hair);font-size:13.5px;}
+      .pf-bk-row span:last-child{font-family:SFMono-Regular,Consolas,monospace;}
       .pf-spark-ax{display:flex;justify-content:space-between;font:400 11px/1.6 SFMono-Regular,monospace;color:var(--muted);padding-top:6px;}
       .pf-foot{font-size:11.5px;line-height:1.7;color:var(--muted);padding:22px 20px 0;}
       .pf-sheet-wrap{position:fixed;inset:0;background:rgba(20,27,45,.55);display:flex;
@@ -1605,7 +2062,6 @@ function Style() {
       @media (prefers-reduced-motion:reduce){*{transition:none!important;}}
     `);
 }
-// If anything fails, say so on screen rather than sitting on "Starting up".
 try {
   if (typeof React === "undefined" || typeof ReactDOM === "undefined") {
     throw new Error("React did not load");
@@ -1615,8 +2071,7 @@ try {
 } catch (err) {
   document.getElementById("root").innerHTML =
     '<div id="boot"><b>Could not start</b><br>' +
-    String(err && err.message ? err.message : err) +
-    '<br><br><small>Open this file in a browser rather than a file preview.</small></div>';
+    String(err && err.message ? err.message : err) + '</div>';
 }
 </script>
 </body>
