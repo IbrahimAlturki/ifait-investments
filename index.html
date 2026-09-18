@@ -544,6 +544,129 @@ async function fetchPrices(autoHoldings) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  صيغة مضغوطة للنسخ — ثلث حجم الصيغة الكاملة                         */
+/*  [label, bucket, market, symbol, qty, price]        ← سعر تلقائي      */
+/*  [label, bucket, "m", valueSar]                     ← يدوي            */
+/*  [label, bucket, "u", units, unitPrice]             ← وحدات × سعر     */
+/*  [label, bucket, "d", principal, rate, start, months, payout]         */
+/* ------------------------------------------------------------------ */
+
+function expandCompact(data) {
+  if (!data || !Array.isArray(data.h)) return null;
+  const d = today();
+  let n = 0;
+  const holdings = data.h.map(row => {
+    const id = "c" + ++n;
+    const [label, bucket, kind] = row;
+    if (kind === "m") {
+      return {
+        id,
+        label,
+        bucket,
+        mode: "manual",
+        valueSar: Number(row[3]) || 0,
+        asOf: d,
+        costBasis: null
+      };
+    }
+    if (kind === "u") {
+      return {
+        id,
+        label,
+        bucket,
+        mode: "manual",
+        units: Number(row[3]) || 0,
+        unitPrice: Number(row[4]) || 0,
+        valueSar: 0,
+        asOf: d,
+        costBasis: null
+      };
+    }
+    if (kind === "d") {
+      return {
+        id,
+        label,
+        bucket,
+        mode: "deposit",
+        principal: Number(row[3]) || 0,
+        rate: Number(row[4]) || 0,
+        startDate: row[5] || d,
+        termMonths: Number(row[6]) || 6,
+        accrual: "simple",
+        payout: row[7] || "periodic",
+        costBasis: null
+      };
+    }
+    // auto: [label, bucket, market, symbol, qty, price]
+    const market = kind;
+    return {
+      id,
+      label,
+      bucket,
+      mode: "auto",
+      market,
+      symbol: String(row[3]),
+      quantity: Number(row[4]) || 0,
+      currency: market === "tadawul" ? "SAR" : "USD",
+      lastPrice: Number(row[5]) || 0,
+      lastPriced: d,
+      costBasis: null,
+      note: ""
+    };
+  });
+  return {
+    holdings,
+    usdRate: Number(data.r) || 3.75,
+    emailTo: data.e || ""
+  };
+}
+
+/* يقبل الصيغتين. لو النص مقطوع يرجع {partial:true} عشان نطلب الباقي. */
+function parseBackup(text) {
+  const t = (text || "").trim();
+  if (!t) return {
+    error: "empty"
+  };
+  try {
+    const parsed = JSON.parse(t);
+    if (Array.isArray(parsed.h)) {
+      const out = expandCompact(parsed);
+      if (out && out.holdings.length) return {
+        data: out
+      };
+    }
+    if (Array.isArray(parsed.holdings) && parsed.holdings.length) return {
+      data: parsed
+    };
+    return {
+      error: "no holdings in there"
+    };
+  } catch (e) {
+    // مقطوع؟ نعد الأقواس: لو المفتوح أكثر من المقفول، النص ما اكتمل.
+    let depth = 0,
+      inStr = false,
+      esc = false;
+    for (const ch of t) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (inStr) {
+        if (ch === "\\") esc = true;else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;else if (ch === "{" || ch === "[") depth++;else if (ch === "}" || ch === "]") depth--;
+    }
+    if (depth > 0 || inStr) return {
+      partial: true
+    };
+    return {
+      error: String(e.message || e)
+    };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  repair on load                                                     */
 /*                                                                     */
 /*  Saved data always wins over new defaults, which is right — your     */
@@ -616,6 +739,7 @@ function Portfolio() {
   const [pasted, setPasted] = useState("");
   const [depositing, setDepositing] = useState(false);
   const [quick, setQuick] = useState(false);
+  const [buffer, setBuffer] = useState("");
   const [toast, setToast] = useState(null);
   const [view, setView] = useState("holdings");
   const flash = useCallback(msg => {
@@ -903,7 +1027,7 @@ function Portfolio() {
           fontFamily: "monospace",
           textAlign: "left"
         },
-        placeholder: "Paste the contents of my-portfolio-backup.txt here",
+        placeholder: buffer ? "الصق الجزء التالي هنا" : "Paste your backup here",
         value: pasted,
         onChange: e => setPasted(e.target.value)
       }), /*#__PURE__*/React.createElement("button", {
@@ -913,21 +1037,32 @@ function Portfolio() {
         },
         disabled: !pasted.trim(),
         onClick: () => {
-          try {
-            const parsed = JSON.parse(pasted);
-            if (!Array.isArray(parsed.holdings) || !parsed.holdings.length) {
-              throw new Error("no holdings in there");
-            }
-            setHoldings(parsed.holdings);
-            if (parsed.usdRate) setUsdRate(parsed.usdRate);
-            if (parsed.emailTo) setEmailTo(parsed.emailTo);
+          const combined = buffer + pasted;
+          const r = parseBackup(combined);
+          if (r.data) {
+            setHoldings(r.data.holdings);
+            if (r.data.usdRate) setUsdRate(r.data.usdRate);
+            if (r.data.emailTo) setEmailTo(r.data.emailTo);
             setPasted("");
-            flash(`Loaded ${parsed.holdings.length} holdings.`);
-          } catch (e) {
-            flash(`That didn't look like backup data — ${e.message}`);
+            setBuffer("");
+            flash(`Loaded ${r.data.holdings.length} holdings.`);
+          } else if (r.partial) {
+            // النص مقطوع: نحفظ اللي وصل ونطلب الباقي
+            setBuffer(combined);
+            setPasted("");
+            flash(`وصل ${combined.length} حرف بس النص ناقص — الصق الباقي واضغط Load مرة ثانية.`);
+          } else {
+            flash(`That didn't look like backup data — ${r.error}`);
           }
         }
-      }, "Load my data"), /*#__PURE__*/React.createElement("button", {
+      }, buffer ? `Load (part ${Math.ceil(buffer.length / 1000) > 0 ? "2+" : "1"})` : "Load my data"), buffer && /*#__PURE__*/React.createElement("button", {
+        className: "pf-btn-ghost",
+        onClick: () => {
+          setBuffer("");
+          setPasted("");
+          flash("بدأنا من جديد.");
+        }
+      }, "إلغاء الأجزاء المحفوظة (", buffer.length, " حرف)"), /*#__PURE__*/React.createElement("button", {
         className: "pf-btn pf-btn-ghost",
         onClick: () => setHoldings([{
           id: uid(),
@@ -1122,23 +1257,26 @@ function Portfolio() {
       flex: 1
     },
     onClick: () => {
-      try {
-        const parsed = JSON.parse(pasted);
-        if (!Array.isArray(parsed.holdings) || !parsed.holdings.length) {
-          throw new Error("no holdings in there");
-        }
-        setHoldings(parsed.holdings);
-        if (parsed.usdRate) setUsdRate(parsed.usdRate);
-        if (parsed.emailTo) setEmailTo(parsed.emailTo);
+      const combined = buffer + pasted;
+      const r = parseBackup(combined);
+      if (r.data) {
+        setHoldings(r.data.holdings);
+        if (r.data.usdRate) setUsdRate(r.data.usdRate);
+        if (r.data.emailTo) setEmailTo(r.data.emailTo);
         setPasted("");
+        setBuffer("");
         setView("holdings");
-        flash(`Restored ${parsed.holdings.length} holdings.`);
-      } catch (e) {
-        flash(`That didn't look like backup data — ${e.message}`);
+        flash(`Restored ${r.data.holdings.length} holdings.`);
+      } else if (r.partial) {
+        setBuffer(combined);
+        setPasted("");
+        flash(`النص ناقص — الصق الباقي واضغط مرة ثانية.`);
+      } else {
+        flash(`That didn't look like backup data — ${r.error}`);
       }
     },
     disabled: !pasted.trim()
-  }, "Paste data in")), /*#__PURE__*/React.createElement("textarea", {
+  }, buffer ? "Paste next part" : "Paste data in")), /*#__PURE__*/React.createElement("textarea", {
     className: "pf-in",
     style: {
       marginTop: 8,
