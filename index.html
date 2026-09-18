@@ -323,6 +323,7 @@ const {
   useMemo,
   useCallback
 } = React;
+const APP_VERSION = "4.0 EN";
 const KEY_MAIN = "portfolio:v1:holdings-and-settings";
 const KEY_SNAPS = "portfolio:v1:snapshots";
 let STORAGE_OK = true;
@@ -1235,7 +1236,11 @@ function Portfolio() {
     snaps: snaps
   })), React.createElement("p", {
     className: "pf-foot"
-  }, "Your numbers are saved on this device and stay in this conversation. Adding up what you own isn't advice about whether to own it."), editing && React.createElement(Editor, {
+  }, "Your numbers are saved on this device and stay in this conversation. Adding up what you own isn't advice about whether to own it.", React.createElement("br", null), React.createElement("span", {
+    style: {
+      opacity: 0.6
+    }
+  }, "Version ", APP_VERSION)), editing && React.createElement(Editor, {
     holding: editing,
     onSave: upsert,
     onDelete: remove,
