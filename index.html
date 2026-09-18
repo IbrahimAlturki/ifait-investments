@@ -323,11 +323,6 @@ const {
   useMemo,
   useCallback
 } = React;
-
-/* ------------------------------------------------------------------ */
-/*  storage                                                            */
-/* ------------------------------------------------------------------ */
-
 const KEY_MAIN = "portfolio:v1:holdings-and-settings";
 const KEY_SNAPS = "portfolio:v1:snapshots";
 let STORAGE_OK = true;
@@ -366,11 +361,6 @@ async function saveKey(key, value) {
     return false;
   }
 }
-
-/* ------------------------------------------------------------------ */
-/*  money + dates                                                      */
-/* ------------------------------------------------------------------ */
-
 const today = () => new Date().toISOString().slice(0, 10);
 const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 const sar = (n, sign = false) => {
@@ -378,8 +368,6 @@ const sar = (n, sign = false) => {
   const p = sign && n > 0 ? "+" : "";
   return p + Math.round(n).toLocaleString("en-US");
 };
-
-// لون حسب الاتجاه: أخضر للربح، أحمر للخسارة، رمادي للثبات
 const tone = n => {
   if (n === null || n === undefined || Number.isNaN(n) || Math.abs(n) < 0.005) return "#69707D";
   return n > 0 ? "#1F6F5C" : "#B24A38";
@@ -393,12 +381,9 @@ function addMonths(iso, months) {
   const d = new Date(iso);
   const target = new Date(d);
   target.setMonth(d.getMonth() + Number(months));
-  // Clamp 31 Jan + 1 month to the last day of February rather than rolling over.
   if (target.getDate() !== d.getDate()) target.setDate(0);
   return target;
 }
-
-/* Fixed-term deposit: value follows from the contract, no price feed needed. */
 function depositValue(h, now = new Date()) {
   const principal = Number(h.principal) || 0;
   const rate = Number(h.rate) || 0;
@@ -437,18 +422,11 @@ function holdingValue(h, usdRate) {
     const qty = Number(h.quantity) || 0;
     return px * qty * (h.currency === "USD" ? usdRate : 1);
   }
-  // Manual holdings can be a flat value, or units x a price you type in —
-  // the Al Rajhi funds publish a NAV daily, so only one number changes.
   if (Number(h.units) > 0 && Number(h.unitPrice) > 0) {
     return Number(h.units) * Number(h.unitPrice);
   }
   return Number(h.valueSar) || 0;
 }
-
-/* ------------------------------------------------------------------ */
-/*  defaults                                                           */
-/* ------------------------------------------------------------------ */
-
 const BUCKETS = ["Tamra", "Al Rajhi funds", "Saudi stocks", "US market", "Crypto", "Cash", "Deposit"];
 const RIBBON = {
   Tamra: "#2E4A7D",
@@ -461,9 +439,6 @@ const RIBBON = {
   Other: "#9AA3B2"
 };
 const uid = () => Math.random().toString(36).slice(2, 9);
-
-// `price` seeds the holding from your screenshots so the app shows real
-// numbers the moment it opens. Update prices overwrites them with live ones.
 const SEEDED = "2026-07-24T00:00:00.000Z";
 const auto = (label, bucket, symbol, market, quantity, costBasis, price, note) => ({
   id: uid(),
@@ -499,24 +474,9 @@ const cashLine = (label, bucket, valueSar) => ({
   asOf: today(),
   costBasis: null
 });
-
-/* ------------------------------------------------------------------ */
-/*  The portfolio as read off the ten screenshots.                     */
-/*  Quantities are exact where the app showed them. Two Tamra lines    */
-/*  (ISDE.L, SPSK) were not in the screenshots — their units are       */
-/*  derived from the donut weights and are marked for checking.        */
-/* ------------------------------------------------------------------ */
-
 function myPortfolio() {
-  // Deliberately empty: this copy is published on the open web.
   return [];
 }
-
-/* ------------------------------------------------------------------ */
-/*  price refresh — routed through Claude with web search, because     */
-/*  most market APIs block browser requests outright                   */
-/* ------------------------------------------------------------------ */
-
 const priceKey = h => h.market + ':' + h.symbol;
 async function fetchPrices(autoHoldings) {
   try {
@@ -542,15 +502,6 @@ async function fetchPrices(autoHoldings) {
     return out;
   }
 }
-
-/* ------------------------------------------------------------------ */
-/*  صيغة مضغوطة للنسخ — ثلث حجم الصيغة الكاملة                         */
-/*  [label, bucket, market, symbol, qty, price]        ← سعر تلقائي      */
-/*  [label, bucket, "m", valueSar]                     ← يدوي            */
-/*  [label, bucket, "u", units, unitPrice]             ← وحدات × سعر     */
-/*  [label, bucket, "d", principal, rate, start, months, payout]         */
-/* ------------------------------------------------------------------ */
-
 function expandCompact(data) {
   if (!data || !Array.isArray(data.h)) return null;
   const d = today();
@@ -597,7 +548,6 @@ function expandCompact(data) {
         costBasis: null
       };
     }
-    // auto: [label, bucket, market, symbol, qty, price]
     const market = kind;
     return {
       id,
@@ -620,8 +570,6 @@ function expandCompact(data) {
     emailTo: data.e || ""
   };
 }
-
-/* يقبل الصيغتين. لو النص مقطوع يرجع {partial:true} عشان نطلب الباقي. */
 function parseBackup(text) {
   const t = (text || "").trim();
   if (!t) return {
@@ -642,7 +590,6 @@ function parseBackup(text) {
       error: "no holdings in there"
     };
   } catch (e) {
-    // مقطوع؟ نعد الأقواس: لو المفتوح أكثر من المقفول، النص ما اكتمل.
     let depth = 0,
       inStr = false,
       esc = false;
@@ -665,17 +612,6 @@ function parseBackup(text) {
     };
   }
 }
-
-/* ------------------------------------------------------------------ */
-/*  repair on load                                                     */
-/*                                                                     */
-/*  Saved data always wins over new defaults, which is right — your     */
-/*  edits shouldn't evaporate. But a holding worth zero is never a real */
-/*  position, it's a missing price. So on every load, anything sitting  */
-/*  at zero gets refilled from the seed data, and everything else is    */
-/*  left exactly as you set it.                                        */
-/* ------------------------------------------------------------------ */
-
 function repair(saved, usdRate) {
   const seed = myPortfolio();
   const byPrice = new Map();
@@ -708,8 +644,6 @@ function repair(saved, usdRate) {
     }
     return h;
   });
-
-  // Anything added since your copy was saved.
   const known = new Set(saved.map(h => h.label));
   const added = seed.filter(s => !known.has(s.label));
   return {
@@ -717,11 +651,6 @@ function repair(saved, usdRate) {
     fixed: fixed + added.length
   };
 }
-
-/* ------------------------------------------------------------------ */
-/*  app                                                                */
-/* ------------------------------------------------------------------ */
-
 function Portfolio() {
   const [ready, setReady] = useState(false);
   const [holdings, setHoldings] = useState([]);
@@ -746,8 +675,6 @@ function Portfolio() {
     setToast(msg);
     setTimeout(() => setToast(null), 3200);
   }, []);
-
-  /* ---- load ---- */
   useEffect(() => {
     (async () => {
       const main = await loadKey(KEY_MAIN, null);
@@ -763,15 +690,12 @@ function Portfolio() {
         setTamraSync(main.tamraSync ?? null);
         setEmailTo(main.emailTo ?? "");
       } else {
-        // First run: your portfolio is already known, so there's nothing to set up.
         setHoldings(myPortfolio());
       }
       setSnaps(history);
       setReady(true);
     })();
   }, []);
-
-  /* ---- persist ---- */
   useEffect(() => {
     if (!ready) return;
     saveKey(KEY_MAIN, {
@@ -782,8 +706,6 @@ function Portfolio() {
     });
   }, [holdings, usdRate, tamraSync, emailTo, ready]);
   const total = useMemo(() => holdings.reduce((s, h) => s + holdingValue(h, usdRate), 0), [holdings, usdRate]);
-
-  /* ---- capture one snapshot per day, whenever the app is opened ---- */
   useEffect(() => {
     if (!ready || holdings.length === 0 || total <= 0) return;
     const d = today();
@@ -808,16 +730,12 @@ function Portfolio() {
       return trimmed;
     });
   }, [ready, total, holdings, usdRate]);
-
-  /* Pull prices once when the app opens. Nothing to tap. */
   const autoPulled = React.useRef(false);
   useEffect(() => {
     if (!ready || autoPulled.current || holdings.length === 0) return;
     autoPulled.current = true;
     refreshRef.current && refreshRef.current(true);
   }, [ready, holdings.length]);
-
-  /* ---- week comparison ---- */
   const weekAgo = useMemo(() => {
     if (snaps.length < 2) return null;
     const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
@@ -827,8 +745,6 @@ function Portfolio() {
   }, [snaps]);
   const change = weekAgo ? total - weekAgo.total : null;
   const changePct = weekAgo && weekAgo.total ? change / weekAgo.total * 100 : null;
-
-  /* ---- grouping ---- */
   const groups = useMemo(() => {
     const map = new Map();
     for (const h of holdings) {
@@ -846,8 +762,6 @@ function Portfolio() {
     })).sort((a, b) => b.total - a.total);
   }, [holdings, usdRate]);
   const stale = holdings.filter(h => h.mode === "manual" && h.asOf && daysBetween(h.asOf, today()) >= 14);
-
-  /* ---- actions ---- */
   const upsert = h => {
     setHoldings(prev => {
       const i = prev.findIndex(x => x.id === h.id);
@@ -876,8 +790,6 @@ function Portfolio() {
         if (h.mode !== "auto") return h;
         const p = Number(prices[priceKey(h)]);
         if (!prices[priceKey(h)] || Number.isNaN(p) || p <= 0) return h;
-
-        // A fourfold jump is almost always a wrong-currency quote.
         const old = Number(h.lastPrice) || 0;
         if (old > 0 && (p > old * 4 || p < old / 4)) {
           rejected.push(h.symbol);
@@ -906,19 +818,16 @@ function Portfolio() {
     }
   };
   refreshRef.current = refresh;
-
-  /* إيداع جديد في تمرا: نوزعه على الصناديق الست حسب أوزانها اليوم،
-     ونحسب كم وحدة يشتري بسعر اليوم. بعدها يتسعّر يومياً لحاله. */
   const applyDeposit = amountSar => {
     const etfs = holdings.filter(h => h.bucket === "Tamra" && h.mode === "auto");
     const priced = etfs.filter(h => Number(h.lastPrice) > 0);
     if (!priced.length) {
-      flash("حدّث الأسعار أول، بعدها أضف الإيداع.");
+      flash("Update prices first, then add the deposit.");
       return;
     }
     const total = priced.reduce((s, h) => s + holdingValue(h, usdRate), 0);
     if (total <= 0) {
-      flash("ما فيه قيمة حالية لتمرا — سوّ مزامنة أول.");
+      flash("Tamra has no current value — sync first.");
       return;
     }
     setHoldings(prev => prev.map(h => {
@@ -933,7 +842,7 @@ function Portfolio() {
       };
     }));
     setDepositing(false);
-    flash(`أضفنا ${sar(amountSar)} ريال على تمرا — انقسمت على الصناديق الست.`);
+    flash(`Added ${sar(amountSar)} SAR to Tamra, split across the six ETFs.`);
   };
   const applySync = updates => {
     setHoldings(prev => prev.map(h => updates[h.id] ? {
@@ -948,16 +857,13 @@ function Portfolio() {
     const lines = [`Portfolio — ${today()}`, `Total: ${sar(total)} SAR`, weekAgo ? `Week: ${sar(change, true)} SAR (${pct(changePct)})` : "", "", ...groups.flatMap(g => [`${g.name} — ${sar(g.total)} SAR`, ...g.items.map(i => `   ${i.label}: ${sar(i._v)}`)])].filter(Boolean);
     return lines.join("\n");
   };
-
-  /* ملف CSV لكل التاريخ المحفوظ — للتحليل في Excel أو Numbers */
   const exportCsv = () => {
-    if (!snaps.length) return flash("ما فيه تاريخ محفوظ بعد.");
+    if (!snaps.length) return flash("No history saved yet.");
     const cols = [...new Set(snaps.flatMap(s => Object.keys(s.buckets || {})))];
     const rows = [["date", "total", ...cols].join(",")];
     for (const s of snaps) {
       rows.push([s.date, Math.round(s.total), ...cols.map(c => s.buckets && s.buckets[c] != null ? s.buckets[c] : "")].join(","));
     }
-    // سطر أخير: الأصول اليوم بالتفصيل
     rows.push("");
     rows.push("holding,bucket,quantity,price,currency,value_sar,cost_sar");
     for (const h of holdings) {
@@ -978,7 +884,7 @@ function Portfolio() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    flash(`${snaps.length} يوم من التاريخ في ملف CSV.`);
+    flash(`${snaps.length} days of history exported as CSV.`);
   };
   const copyReport = async () => {
     try {
@@ -988,38 +894,31 @@ function Portfolio() {
       flash("Couldn't copy. Use Email report instead.");
     }
   };
-
-  // No server, no schedule — this just opens your mail app with the report
-  // already written. You tap send. Two taps, once a week.
   const emailReport = () => {
     const subject = `Portfolio ${today()} — ${sar(total)} SAR`;
     window.location.href = `mailto:${encodeURIComponent(emailTo)}` + `?subject=${encodeURIComponent(subject)}` + `&body=${encodeURIComponent(reportText())}`;
   };
   if (!ready) {
-    return /*#__PURE__*/React.createElement("div", {
+    return React.createElement("div", {
       className: "pf-root"
-    }, /*#__PURE__*/React.createElement(Style, null), /*#__PURE__*/React.createElement("div", {
+    }, React.createElement(Style, null), React.createElement("div", {
       className: "pf-loading"
     }, "Loading your portfolio…"));
   }
-
-  /* ---- nothing loaded yet ---- */
   if (holdings.length === 0) {
-    // The published copy carries no figures on purpose, so there is nothing
-    // to "set up" — what it needs is your backup text.
     const seeded = myPortfolio();
     if (seeded.length === 0) {
-      return /*#__PURE__*/React.createElement("div", {
+      return React.createElement("div", {
         className: "pf-root"
-      }, /*#__PURE__*/React.createElement(Style, null), /*#__PURE__*/React.createElement("div", {
+      }, React.createElement(Style, null), React.createElement("div", {
         className: "pf-empty"
-      }, /*#__PURE__*/React.createElement("div", {
+      }, React.createElement("div", {
         className: "pf-eyebrow"
-      }, "Portfolio tracker"), /*#__PURE__*/React.createElement("h1", {
+      }, "Portfolio tracker"), React.createElement("h1", {
         className: "pf-empty-h"
-      }, "Load your portfolio."), /*#__PURE__*/React.createElement("p", {
+      }, "Load your portfolio."), React.createElement("p", {
         className: "pf-empty-p"
-      }, "This copy is published on the open web, so it holds none of your figures. Paste your backup below — it's saved to this phone only, and never leaves it."), /*#__PURE__*/React.createElement("textarea", {
+      }, "This copy is published on the open web, so it holds none of your figures. Paste your backup below — it's saved to this phone only, and never leaves it."), React.createElement("textarea", {
         className: "pf-in",
         style: {
           minHeight: 120,
@@ -1027,10 +926,10 @@ function Portfolio() {
           fontFamily: "monospace",
           textAlign: "left"
         },
-        placeholder: buffer ? "الصق الجزء التالي هنا" : "Paste your backup here",
+        placeholder: buffer ? "Paste the next part here" : "Paste your backup here",
         value: pasted,
         onChange: e => setPasted(e.target.value)
-      }), /*#__PURE__*/React.createElement("button", {
+      }), React.createElement("button", {
         className: "pf-btn pf-btn-primary",
         style: {
           marginTop: 14
@@ -1047,22 +946,21 @@ function Portfolio() {
             setBuffer("");
             flash(`Loaded ${r.data.holdings.length} holdings.`);
           } else if (r.partial) {
-            // النص مقطوع: نحفظ اللي وصل ونطلب الباقي
             setBuffer(combined);
             setPasted("");
-            flash(`وصل ${combined.length} حرف بس النص ناقص — الصق الباقي واضغط Load مرة ثانية.`);
+            flash(`Got ${combined.length} characters but the text is incomplete — paste the rest and tap Load again.`);
           } else {
             flash(`That didn't look like backup data — ${r.error}`);
           }
         }
-      }, buffer ? `Load (part ${Math.ceil(buffer.length / 1000) > 0 ? "2+" : "1"})` : "Load my data"), buffer && /*#__PURE__*/React.createElement("button", {
+      }, buffer ? `Load (part ${Math.ceil(buffer.length / 1000) > 0 ? "2+" : "1"})` : "Load my data"), buffer && React.createElement("button", {
         className: "pf-btn-ghost",
         onClick: () => {
           setBuffer("");
           setPasted("");
-          flash("بدأنا من جديد.");
+          flash("Cleared.");
         }
-      }, "إلغاء الأجزاء المحفوظة (", buffer.length, " حرف)"), /*#__PURE__*/React.createElement("button", {
+      }, "Discard saved parts (", buffer.length, " chars)"), React.createElement("button", {
         className: "pf-btn pf-btn-ghost",
         onClick: () => setHoldings([{
           id: uid(),
@@ -1073,52 +971,52 @@ function Portfolio() {
           asOf: today(),
           costBasis: null
         }])
-      }, "Start from scratch instead")), toast && /*#__PURE__*/React.createElement("div", {
+      }, "Start from scratch instead")), toast && React.createElement("div", {
         className: "pf-toast"
       }, toast));
     }
-    return /*#__PURE__*/React.createElement("div", {
+    return React.createElement("div", {
       className: "pf-root"
-    }, /*#__PURE__*/React.createElement(Style, null), /*#__PURE__*/React.createElement("div", {
+    }, React.createElement(Style, null), React.createElement("div", {
       className: "pf-empty"
-    }, /*#__PURE__*/React.createElement("div", {
+    }, React.createElement("div", {
       className: "pf-eyebrow"
-    }, "Portfolio tracker"), /*#__PURE__*/React.createElement("h1", {
+    }, "Portfolio tracker"), React.createElement("h1", {
       className: "pf-empty-h"
-    }, "Everything you own, in one number."), /*#__PURE__*/React.createElement("p", {
+    }, "Everything you own, in one number."), React.createElement("p", {
       className: "pf-empty-p"
-    }, "Your accounts are ready to load — Al Rajhi, Tamra, Tadawul, crypto, cash and the deposit."), /*#__PURE__*/React.createElement("button", {
+    }, "Your accounts are ready to load — Al Rajhi, Tamra, Tadawul, crypto, cash and the deposit."), React.createElement("button", {
       className: "pf-btn pf-btn-primary",
       onClick: () => setHoldings(seeded)
-    }, "Load my accounts")), toast && /*#__PURE__*/React.createElement("div", {
+    }, "Load my accounts")), toast && React.createElement("div", {
       className: "pf-toast"
     }, toast));
   }
   const shown = filter ? groups.filter(g => g.name === filter) : groups;
-  return /*#__PURE__*/React.createElement("div", {
+  return React.createElement("div", {
     className: "pf-root"
-  }, /*#__PURE__*/React.createElement(Style, null), /*#__PURE__*/React.createElement("div", {
+  }, React.createElement(Style, null), React.createElement("div", {
     className: "pf-head"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-eyebrow"
-  }, "Total portfolio"), /*#__PURE__*/React.createElement("div", {
+  }, "Total portfolio"), React.createElement("div", {
     className: "pf-total"
-  }, sar(total), /*#__PURE__*/React.createElement("span", {
+  }, sar(total), React.createElement("span", {
     className: "pf-cur"
-  }, "SAR")), /*#__PURE__*/React.createElement("div", {
+  }, "SAR")), React.createElement("div", {
     className: "pf-delta"
-  }, weekAgo ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+  }, weekAgo ? React.createElement(React.Fragment, null, React.createElement("span", {
     style: {
       color: change >= 0 ? "#5FD3AE" : "#F08B78",
       fontWeight: 600
     }
-  }, sar(change, true), " SAR · ", pct(changePct)), /*#__PURE__*/React.createElement("span", {
+  }, sar(change, true), " SAR · ", pct(changePct)), React.createElement("span", {
     className: "pf-dim"
-  }, " since ", weekAgo.date)) : /*#__PURE__*/React.createElement("span", {
+  }, " since ", weekAgo.date)) : React.createElement("span", {
     className: "pf-dim"
-  }, "Tracking from today — a comparison appears once there's history.")), total > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "Tracking from today — a comparison appears once there's history.")), total > 0 && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "pf-ribbon"
-  }, groups.map(g => /*#__PURE__*/React.createElement("button", {
+  }, groups.map(g => React.createElement("button", {
     key: g.name,
     title: `${g.name} ${(g.total / total * 100).toFixed(0)}%`,
     onClick: () => setFilter(filter === g.name ? null : g.name),
@@ -1127,23 +1025,23 @@ function Portfolio() {
       background: RIBBON[g.name] || RIBBON.Other,
       opacity: filter && filter !== g.name ? 0.3 : 1
     }
-  }))), /*#__PURE__*/React.createElement("div", {
+  }))), React.createElement("div", {
     className: "pf-legend"
-  }, groups.map(g => /*#__PURE__*/React.createElement("button", {
+  }, groups.map(g => React.createElement("button", {
     key: g.name,
     className: `pf-chip ${filter === g.name ? "on" : ""}`,
     onClick: () => setFilter(filter === g.name ? null : g.name)
-  }, /*#__PURE__*/React.createElement("i", {
+  }, React.createElement("i", {
     style: {
       background: RIBBON[g.name] || RIBBON.Other
     }
-  }), g.name, " ", /*#__PURE__*/React.createElement("b", null, (g.total / total * 100).toFixed(0), "%")))))), /*#__PURE__*/React.createElement("div", {
+  }), g.name, " ", React.createElement("b", null, (g.total / total * 100).toFixed(0), "%")))))), React.createElement("div", {
     className: "pf-bar"
-  }, /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("button", {
     className: "pf-btn pf-btn-primary",
     disabled: busy,
     onClick: () => refresh(false)
-  }, busy ? `Fetching ${progress || ""}` : "Update prices"), /*#__PURE__*/React.createElement("button", {
+  }, busy ? `Fetching ${progress || ""}` : "Update prices"), React.createElement("button", {
     className: "pf-btn",
     onClick: () => setEditing({
       id: uid(),
@@ -1153,86 +1051,86 @@ function Portfolio() {
       valueSar: 0,
       asOf: today()
     })
-  }, "Add holding"), /*#__PURE__*/React.createElement("button", {
+  }, "Add holding"), React.createElement("button", {
     className: "pf-btn",
     onClick: emailReport
-  }, "Email report"), /*#__PURE__*/React.createElement("button", {
+  }, "Email report"), React.createElement("button", {
     className: "pf-btn",
     onClick: copyReport
-  }, "Copy"), /*#__PURE__*/React.createElement("button", {
+  }, "Copy"), React.createElement("button", {
     className: "pf-btn",
     onClick: exportCsv
-  }, "CSV"), /*#__PURE__*/React.createElement("button", {
+  }, "CSV"), React.createElement("button", {
     className: "pf-btn",
     onClick: () => setQuick(true)
-  }, "تحديث سريع"), /*#__PURE__*/React.createElement("button", {
+  }, "Quick update"), React.createElement("button", {
     className: "pf-btn",
     onClick: () => setView(view === "settings" ? "holdings" : "settings")
-  }, view === "settings" ? "Done" : "Settings")), typeof window !== "undefined" && window.__STORAGE_NOTE__ && /*#__PURE__*/React.createElement("div", {
+  }, view === "settings" ? "Done" : "Settings")), typeof window !== "undefined" && window.__STORAGE_NOTE__ && React.createElement("div", {
     className: "pf-warn",
     style: {
       margin: "14px 20px 0"
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Nothing you change here will be saved"), /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("b", null, "Nothing you change here will be saved"), React.createElement("div", {
     style: {
       marginTop: 4
     }
-  }, window.__STORAGE_NOTE__)), repaired > 0 && /*#__PURE__*/React.createElement("div", {
+  }, window.__STORAGE_NOTE__)), repaired > 0 && React.createElement("div", {
     className: "pf-flag"
-  }, /*#__PURE__*/React.createElement("b", null, "Filled in ", repaired, " holding", repaired === 1 ? "" : "s", " that had no value"), /*#__PURE__*/React.createElement("div", null, "Prices came from your screenshots. Tap any line to change one.")), view !== "settings" && /*#__PURE__*/React.createElement(DailyMovers, {
+  }, React.createElement("b", null, "Filled in ", repaired, " holding", repaired === 1 ? "" : "s", " that had no value"), React.createElement("div", null, "Prices came from your screenshots. Tap any line to change one.")), view !== "settings" && React.createElement(DailyMovers, {
     snaps: snaps,
     holdings: holdings
-  }), stale.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }), stale.length > 0 && React.createElement("div", {
     className: "pf-flag"
-  }, /*#__PURE__*/React.createElement("b", null, stale.length, " figure", stale.length === 1 ? "" : "s", " out of date"), stale.map(h => /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("b", null, stale.length, " figure", stale.length === 1 ? "" : "s", " out of date"), stale.map(h => React.createElement("div", {
     key: h.id
-  }, "• ", h.label, " — last updated ", daysBetween(h.asOf, today()), " days ago"))), view === "settings" ? /*#__PURE__*/React.createElement("div", {
+  }, "• ", h.label, " — last updated ", daysBetween(h.asOf, today()), " days ago"))), view === "settings" ? React.createElement("div", {
     className: "pf-card"
-  }, /*#__PURE__*/React.createElement("label", {
+  }, React.createElement("label", {
     className: "pf-lbl"
-  }, "USD → SAR rate"), /*#__PURE__*/React.createElement("input", {
+  }, "USD → SAR rate"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     value: usdRate,
     onChange: e => setUsdRate(Number(e.target.value) || 0)
-  }), /*#__PURE__*/React.createElement("p", {
+  }), React.createElement("p", {
     className: "pf-hint"
-  }, "The riyal is pegged at 3.75, so this rarely needs touching. It converts your Bitcoin and US holdings into SAR."), /*#__PURE__*/React.createElement("label", {
+  }, "The riyal is pegged at 3.75, so this rarely needs touching. It converts your Bitcoin and US holdings into SAR."), React.createElement("label", {
     className: "pf-lbl",
     style: {
       marginTop: 18
     }
-  }, "Send reports to"), /*#__PURE__*/React.createElement("input", {
+  }, "Send reports to"), React.createElement("input", {
     className: "pf-in",
     inputMode: "email",
     value: emailTo,
     onChange: e => setEmailTo(e.target.value)
-  }), /*#__PURE__*/React.createElement("p", {
+  }), React.createElement("p", {
     className: "pf-hint"
-  }, "Email report opens your mail app with everything already filled in. You still tap send — nothing is sent on your behalf."), /*#__PURE__*/React.createElement("label", {
+  }, "Email report opens your mail app with everything already filled in. You still tap send — nothing is sent on your behalf."), React.createElement("label", {
     className: "pf-lbl",
     style: {
       marginTop: 18
     }
-  }, "History"), /*#__PURE__*/React.createElement("p", {
+  }, "History"), React.createElement("p", {
     className: "pf-hint"
-  }, snaps.length, " daily snapshot", snaps.length === 1 ? "" : "s", " saved. A new one is captured each day you open this."), /*#__PURE__*/React.createElement("label", {
+  }, snaps.length, " daily snapshot", snaps.length === 1 ? "" : "s", " saved. A new one is captured each day you open this."), React.createElement("label", {
     className: "pf-lbl",
     style: {
       marginTop: 18
     }
-  }, "Back up / restore"), /*#__PURE__*/React.createElement("p", {
+  }, "Back up / restore"), React.createElement("p", {
     className: "pf-hint",
     style: {
       marginTop: 0
     }
-  }, "Your data lives only on this device. Copy it out to move it somewhere else, or paste it back to restore."), /*#__PURE__*/React.createElement("div", {
+  }, "Your data lives only on this device. Copy it out to move it somewhere else, or paste it back to restore."), React.createElement("div", {
     style: {
       display: "flex",
       gap: 8,
       marginTop: 8
     }
-  }, /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("button", {
     className: "pf-btn",
     style: {
       flex: 1
@@ -1251,7 +1149,7 @@ function Portfolio() {
         flash("Couldn't copy — select the text below and copy it.");
       }
     }
-  }, "Copy my data out"), /*#__PURE__*/React.createElement("button", {
+  }, "Copy my data out"), React.createElement("button", {
     className: "pf-btn",
     style: {
       flex: 1
@@ -1270,13 +1168,13 @@ function Portfolio() {
       } else if (r.partial) {
         setBuffer(combined);
         setPasted("");
-        flash(`النص ناقص — الصق الباقي واضغط مرة ثانية.`);
+        flash(`Text incomplete — paste the rest and tap again.`);
       } else {
         flash(`That didn't look like backup data — ${r.error}`);
       }
     },
     disabled: !pasted.trim()
-  }, buffer ? "Paste next part" : "Paste data in")), /*#__PURE__*/React.createElement("textarea", {
+  }, buffer ? "Paste next part" : "Paste data in")), React.createElement("textarea", {
     className: "pf-in",
     style: {
       marginTop: 8,
@@ -1287,12 +1185,12 @@ function Portfolio() {
     placeholder: "Paste your backup here, then tap Paste data in",
     value: pasted,
     onChange: e => setPasted(e.target.value)
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl",
     style: {
       marginTop: 18
     }
-  }, "Reset"), /*#__PURE__*/React.createElement("button", {
+  }, "Reset"), React.createElement("button", {
     className: "pf-btn pf-btn-danger",
     onClick: () => {
       if (confirmReset) {
@@ -1304,45 +1202,45 @@ function Portfolio() {
         setConfirmReset(true);
       }
     }
-  }, confirmReset ? "Tap again to confirm" : "Reload from screenshots"), /*#__PURE__*/React.createElement("p", {
+  }, confirmReset ? "Tap again to confirm" : "Reload from screenshots"), React.createElement("p", {
     className: "pf-hint"
-  }, "Replaces everything with the positions read off your ten screenshots. Any edits you've made since are lost.")) : /*#__PURE__*/React.createElement(React.Fragment, null, shown.map(g => /*#__PURE__*/React.createElement("div", {
+  }, "Replaces everything with the positions read off your ten screenshots. Any edits you've made since are lost.")) : React.createElement(React.Fragment, null, shown.map(g => React.createElement("div", {
     key: g.name,
     className: "pf-group"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-group-head"
-  }, /*#__PURE__*/React.createElement("span", {
+  }, React.createElement("span", {
     className: "pf-group-name"
-  }, g.name), g.name === "Tamra" && /*#__PURE__*/React.createElement("button", {
+  }, g.name), g.name === "Tamra" && React.createElement("button", {
     className: "pf-mini",
     onClick: () => setDepositing(true)
-  }, "+ إيداع"), g.name === "Tamra" && /*#__PURE__*/React.createElement("button", {
+  }, "+ Deposit"), g.name === "Tamra" && React.createElement("button", {
     className: "pf-mini",
     onClick: () => setSyncing(true)
-  }, tamraSync ? daysBetween(tamraSync, today()) === 0 ? "synced today" : `synced ${daysBetween(tamraSync, today())}d ago` : "sync from app"), /*#__PURE__*/React.createElement("span", {
+  }, tamraSync ? daysBetween(tamraSync, today()) === 0 ? "synced today" : `synced ${daysBetween(tamraSync, today())}d ago` : "sync from app"), React.createElement("span", {
     className: "pf-group-total"
-  }, sar(g.total))), g.items.map(h => /*#__PURE__*/React.createElement("button", {
+  }, sar(g.total))), g.items.map(h => React.createElement("button", {
     key: h.id,
     className: "pf-row",
     onClick: () => setEditing(h)
-  }, /*#__PURE__*/React.createElement("span", {
+  }, React.createElement("span", {
     className: "pf-row-l"
-  }, /*#__PURE__*/React.createElement("span", {
+  }, React.createElement("span", {
     className: "pf-row-label"
-  }, h.label || "Untitled"), /*#__PURE__*/React.createElement("span", {
+  }, h.label || "Untitled"), React.createElement("span", {
     className: "pf-row-sub"
-  }, subtitle(h, usdRate))), /*#__PURE__*/React.createElement("span", {
+  }, subtitle(h, usdRate))), React.createElement("span", {
     className: "pf-row-v"
-  }, sar(h._v)))))), snaps.length > 3 && /*#__PURE__*/React.createElement(Trend, {
+  }, sar(h._v)))))), snaps.length > 3 && React.createElement(Trend, {
     snaps: snaps
-  })), /*#__PURE__*/React.createElement("p", {
+  })), React.createElement("p", {
     className: "pf-foot"
-  }, "Your numbers are saved on this device and stay in this conversation. Adding up what you own isn't advice about whether to own it."), editing && /*#__PURE__*/React.createElement(Editor, {
+  }, "Your numbers are saved on this device and stay in this conversation. Adding up what you own isn't advice about whether to own it."), editing && React.createElement(Editor, {
     holding: editing,
     onSave: upsert,
     onDelete: remove,
     onClose: () => setEditing(null)
-  }), quick && /*#__PURE__*/React.createElement(QuickUpdate, {
+  }), quick && React.createElement(QuickUpdate, {
     holdings: holdings,
     onApply: updates => {
       setHoldings(prev => prev.map(h => updates[h.id] !== undefined ? {
@@ -1351,24 +1249,21 @@ function Portfolio() {
         asOf: today()
       } : h));
       setQuick(false);
-      flash(`حدّثنا ${Object.keys(updates).length} رقم.`);
+      flash(`Updated ${Object.keys(updates).length} figure${Object.keys(updates).length === 1 ? "" : "s"}.`);
     },
     onClose: () => setQuick(false)
-  }), depositing && /*#__PURE__*/React.createElement(TamraDeposit, {
+  }), depositing && React.createElement(TamraDeposit, {
     onApply: applyDeposit,
     onClose: () => setDepositing(false)
-  }), syncing && /*#__PURE__*/React.createElement(TamraSync, {
+  }), syncing && React.createElement(TamraSync, {
     holdings: holdings,
     usdRate: usdRate,
     onApply: applySync,
     onClose: () => setSyncing(false)
-  }), toast && /*#__PURE__*/React.createElement("div", {
+  }), toast && React.createElement("div", {
     className: "pf-toast"
   }, toast));
 }
-
-/* ------------------------------------------------------------------ */
-
 function subtitle(h, usdRate) {
   if (h.mode === "deposit") return depositValue(h).note;
   if (h.mode === "auto") {
@@ -1385,8 +1280,7 @@ function subtitle(h, usdRate) {
 function Trend({
   snaps
 }) {
-  // فترات مختلفة عشان تشوف النمو على مدى قصير أو طويل
-  const RANGES = [["أسبوع", 7], ["شهر", 30], ["3 شهور", 90], ["الكل", 9999]];
+  const RANGES = [["1W", 7], ["1M", 30], ["3M", 90], ["All", 9999]];
   const [range, setRange] = useState(30);
   const [picked, setPicked] = useState(null);
   const pts = useMemo(() => {
@@ -1403,18 +1297,12 @@ function Trend({
   const first = pts[0];
   const last = pts[pts.length - 1];
   const shown = picked || last;
-
-  // التغير عبر الفترة المختارة
   const change = last.total - first.total;
   const changePct = first.total ? change / first.total * 100 : 0;
-
-  // التغير من اليوم اللي قبله للنقطة المختارة
   const idx = pts.findIndex(p => p.date === shown.date);
   const prev = idx > 0 ? pts[idx - 1] : null;
   const dayChange = prev ? shown.total - prev.total : null;
   const dayPct = prev && prev.total ? dayChange / prev.total * 100 : null;
-
-  // خط الرسم كـ SVG — أوضح من الأعمدة للنمو
   const W = 300,
     H = 90;
   const x = i => i / (pts.length - 1) * W;
@@ -1423,28 +1311,28 @@ function Trend({
   const area = `${line} L${W},${H} L0,${H} Z`;
   const up = change >= 0;
   const stroke = up ? "#1F6F5C" : "#B24A38";
-  return /*#__PURE__*/React.createElement("div", {
+  return React.createElement("div", {
     className: "pf-card"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-trend-top"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", null, React.createElement("div", {
     className: "pf-lbl",
     style: {
       margin: 0
     }
-  }, picked ? shown.date : "الإجمالي"), /*#__PURE__*/React.createElement("div", {
+  }, picked ? shown.date : "Total"), React.createElement("div", {
     className: "pf-trend-val"
-  }, sar(shown.total)), dayChange !== null && /*#__PURE__*/React.createElement("div", {
+  }, sar(shown.total)), dayChange !== null && React.createElement("div", {
     className: "pf-trend-day",
     style: {
       color: tone(dayChange)
     }
-  }, sar(dayChange, true), " · ", pct(dayPct), " عن اليوم السابق")), /*#__PURE__*/React.createElement("div", {
+  }, sar(dayChange, true), " · ", pct(dayPct), " vs previous day")), React.createElement("div", {
     className: "pf-trend-chg",
     style: {
       color: stroke
     }
-  }, sar(change, true), /*#__PURE__*/React.createElement("span", null, pct(changePct)))), /*#__PURE__*/React.createElement("svg", {
+  }, sar(change, true), React.createElement("span", null, pct(changePct)))), React.createElement("svg", {
     className: "pf-svg",
     dir: "ltr",
     viewBox: `0 0 ${W} ${H}`,
@@ -1455,24 +1343,24 @@ function Trend({
       const i = Math.max(0, Math.min(pts.length - 1, Math.round(rel * (pts.length - 1))));
       setPicked(pts[i].date === (picked && picked.date) ? null : pts[i]);
     }
-  }, /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("linearGradient", {
+  }, React.createElement("defs", null, React.createElement("linearGradient", {
     id: "pfFill",
     x1: "0",
     y1: "0",
     x2: "0",
     y2: "1"
-  }, /*#__PURE__*/React.createElement("stop", {
+  }, React.createElement("stop", {
     offset: "0%",
     stopColor: stroke,
     stopOpacity: "0.22"
-  }), /*#__PURE__*/React.createElement("stop", {
+  }), React.createElement("stop", {
     offset: "100%",
     stopColor: stroke,
     stopOpacity: "0"
-  }))), /*#__PURE__*/React.createElement("path", {
+  }))), React.createElement("path", {
     d: area,
     fill: "url(#pfFill)"
-  }), /*#__PURE__*/React.createElement("path", {
+  }), React.createElement("path", {
     d: line,
     fill: "none",
     stroke: stroke,
@@ -1480,7 +1368,7 @@ function Trend({
     strokeLinejoin: "round",
     strokeLinecap: "round",
     vectorEffect: "non-scaling-stroke"
-  }), idx >= 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("line", {
+  }), idx >= 0 && React.createElement(React.Fragment, null, React.createElement("line", {
     x1: x(idx),
     y1: "0",
     x2: x(idx),
@@ -1489,7 +1377,7 @@ function Trend({
     strokeWidth: "1",
     strokeDasharray: "3 3",
     vectorEffect: "non-scaling-stroke"
-  }), /*#__PURE__*/React.createElement("circle", {
+  }), React.createElement("circle", {
     cx: x(idx),
     cy: y(shown.total),
     r: "3.5",
@@ -1497,47 +1385,42 @@ function Trend({
     stroke: stroke,
     strokeWidth: "2",
     vectorEffect: "non-scaling-stroke"
-  }))), /*#__PURE__*/React.createElement("div", {
+  }))), React.createElement("div", {
     className: "pf-spark-ax",
     dir: "ltr"
-  }, /*#__PURE__*/React.createElement("span", null, first.date), /*#__PURE__*/React.createElement("span", null, last.date)), first.buckets && last.buckets && /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("span", null, first.date), React.createElement("span", null, last.date)), first.buckets && last.buckets && React.createElement("div", {
     className: "pf-bk"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-lbl"
-  }, "التغير حسب المجموعة · ", /*#__PURE__*/React.createElement("span", {
+  }, "Change by group · ", React.createElement("span", {
     dir: "ltr"
-  }, first.date, " → ", last.date)), Object.keys(last.buckets).map(k => [k, last.buckets[k] - (first.buckets[k] ?? last.buckets[k])]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([k, d]) => /*#__PURE__*/React.createElement("div", {
+  }, first.date, " → ", last.date)), Object.keys(last.buckets).map(k => [k, last.buckets[k] - (first.buckets[k] ?? last.buckets[k])]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([k, d]) => React.createElement("div", {
     key: k,
     className: "pf-bk-row"
-  }, /*#__PURE__*/React.createElement("span", null, k), /*#__PURE__*/React.createElement("span", {
+  }, React.createElement("span", null, k), React.createElement("span", {
     dir: "ltr",
     style: {
       color: tone(d)
     }
-  }, sar(d, true))))), /*#__PURE__*/React.createElement("div", {
+  }, sar(d, true))))), React.createElement("div", {
     className: "pf-seg",
     style: {
       marginTop: 12
     }
-  }, RANGES.map(([label, days]) => /*#__PURE__*/React.createElement("button", {
+  }, RANGES.map(([label, days]) => React.createElement("button", {
     key: days,
     className: range === days ? "on" : "",
     onClick: () => {
       setRange(days);
       setPicked(null);
     }
-  }, label))), /*#__PURE__*/React.createElement("p", {
+  }, label))), React.createElement("p", {
     className: "pf-hint",
     style: {
       marginTop: 8
     }
-  }, "اضغط على الرسم لتشوف أي يوم."));
+  }, "Tap the chart to see any day."));
 }
-
-/* ------------------------------------------------------------------ */
-/*  editor                                                             */
-/* ------------------------------------------------------------------ */
-
 function Editor({
   holding,
   onSave,
@@ -1583,50 +1466,50 @@ function Editor({
       payout: "maturity"
     });
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return React.createElement("div", {
     className: "pf-sheet-wrap",
     onClick: onClose
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-sheet",
     onClick: e => e.stopPropagation()
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-sheet-head"
-  }, /*#__PURE__*/React.createElement("b", null, holding.label ? "Edit holding" : "New holding"), /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("b", null, holding.label ? "Edit holding" : "New holding"), React.createElement("button", {
     className: "pf-x",
     onClick: onClose
-  }, "✕")), /*#__PURE__*/React.createElement("label", {
+  }, "✕")), React.createElement("label", {
     className: "pf-lbl"
-  }, "Name"), /*#__PURE__*/React.createElement("input", {
+  }, "Name"), React.createElement("input", {
     className: "pf-in",
     value: h.label,
     placeholder: "Al Rajhi Capital fund",
     onChange: e => set("label", e.target.value)
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl"
-  }, "Group"), /*#__PURE__*/React.createElement("select", {
+  }, "Group"), React.createElement("select", {
     className: "pf-in",
     value: h.bucket,
     onChange: e => set("bucket", e.target.value)
-  }, BUCKETS.map(b => /*#__PURE__*/React.createElement("option", {
+  }, BUCKETS.map(b => React.createElement("option", {
     key: b
-  }, b))), /*#__PURE__*/React.createElement("label", {
+  }, b))), React.createElement("label", {
     className: "pf-lbl"
-  }, "How is it valued?"), /*#__PURE__*/React.createElement("div", {
+  }, "How is it valued?"), React.createElement("div", {
     className: "pf-seg"
-  }, [["manual", "I enter it"], ["auto", "Live price"], ["deposit", "Deposit"]].map(([m, t]) => /*#__PURE__*/React.createElement("button", {
+  }, [["manual", "I enter it"], ["auto", "Live price"], ["deposit", "Deposit"]].map(([m, t]) => React.createElement("button", {
     key: m,
     className: h.mode === m ? "on" : "",
     onClick: () => switchMode(m)
-  }, t))), h.mode === "manual" && /*#__PURE__*/React.createElement(React.Fragment, null, Number(h.units) > 0 ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
+  }, t))), h.mode === "manual" && React.createElement(React.Fragment, null, Number(h.units) > 0 ? React.createElement(React.Fragment, null, React.createElement("label", {
     className: "pf-lbl"
-  }, "Units held"), /*#__PURE__*/React.createElement("input", {
+  }, "Units held"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     value: h.units,
     onChange: e => set("units", Number(e.target.value) || 0)
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl"
-  }, "Unit price / NAV (SAR)"), /*#__PURE__*/React.createElement("input", {
+  }, "Unit price / NAV (SAR)"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     value: h.unitPrice,
@@ -1634,29 +1517,29 @@ function Editor({
       set("unitPrice", Number(e.target.value) || 0);
       set("asOf", today());
     }
-  }), /*#__PURE__*/React.createElement("div", {
+  }), React.createElement("div", {
     className: "pf-calc"
-  }, "Worth today:", " ", /*#__PURE__*/React.createElement("b", null, sar((Number(h.units) || 0) * (Number(h.unitPrice) || 0)), " SAR"), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+  }, "Worth today:", " ", React.createElement("b", null, sar((Number(h.units) || 0) * (Number(h.unitPrice) || 0)), " SAR"), React.createElement("br", null), React.createElement("span", {
     className: "pf-dim2"
-  }, "Units stay put — just update the NAV from the Al Rajhi app."))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
+  }, "Units stay put — just update the NAV from the Al Rajhi app."))) : React.createElement(React.Fragment, null, React.createElement("label", {
     className: "pf-lbl"
-  }, "Value in SAR"), /*#__PURE__*/React.createElement("input", {
+  }, "Value in SAR"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     value: h.valueSar,
     onChange: e => set("valueSar", Number(e.target.value) || 0)
-  })), /*#__PURE__*/React.createElement("label", {
+  })), React.createElement("label", {
     className: "pf-lbl"
-  }, "As of"), /*#__PURE__*/React.createElement("input", {
+  }, "As of"), React.createElement("input", {
     className: "pf-in",
     type: "date",
     value: h.asOf || today(),
     onChange: e => set("asOf", e.target.value)
-  }), /*#__PURE__*/React.createElement("p", {
+  }), React.createElement("p", {
     className: "pf-hint"
-  }, "For Al Rajhi Capital and Tamra — neither publishes an API, so this is the number you copy from their app. Anything over two weeks old gets flagged at the top.")), h.mode === "auto" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
+  }, "For Al Rajhi Capital and Tamra — neither publishes an API, so this is the number you copy from their app. Anything over two weeks old gets flagged at the top.")), h.mode === "auto" && React.createElement(React.Fragment, null, React.createElement("label", {
     className: "pf-lbl"
-  }, "Market"), /*#__PURE__*/React.createElement("select", {
+  }, "Market"), React.createElement("select", {
     className: "pf-in",
     value: h.market,
     onChange: e => {
@@ -1664,109 +1547,104 @@ function Editor({
       set("market", m);
       set("currency", m === "tadawul" ? "SAR" : "USD");
     }
-  }, /*#__PURE__*/React.createElement("option", {
+  }, React.createElement("option", {
     value: "tadawul"
-  }, "Tadawul (Saudi)"), /*#__PURE__*/React.createElement("option", {
+  }, "Tadawul (Saudi)"), React.createElement("option", {
     value: "us"
-  }, "US market"), /*#__PURE__*/React.createElement("option", {
+  }, "US market"), React.createElement("option", {
     value: "lse"
-  }, "London (USD line)"), /*#__PURE__*/React.createElement("option", {
+  }, "London (USD line)"), React.createElement("option", {
     value: "crypto"
-  }, "Crypto")), /*#__PURE__*/React.createElement("label", {
+  }, "Crypto")), React.createElement("label", {
     className: "pf-lbl"
-  }, h.market === "tadawul" ? "Symbol (4 digits, e.g. 1120)" : h.market === "crypto" ? "Coin (e.g. bitcoin)" : h.market === "lse" ? "Ticker (e.g. ISDW.L)" : "Ticker (e.g. SPUS)"), /*#__PURE__*/React.createElement("input", {
+  }, h.market === "tadawul" ? "Symbol (4 digits, e.g. 1120)" : h.market === "crypto" ? "Coin (e.g. bitcoin)" : h.market === "lse" ? "Ticker (e.g. ISDW.L)" : "Ticker (e.g. SPUS)"), React.createElement("input", {
     className: "pf-in",
     value: h.symbol,
     onChange: e => set("symbol", e.target.value.trim())
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl"
-  }, "Units held"), /*#__PURE__*/React.createElement("input", {
+  }, "Units held"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     value: h.quantity,
     onChange: e => set("quantity", Number(e.target.value) || 0)
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl"
-  }, "Last price (", h.currency, ")"), /*#__PURE__*/React.createElement("input", {
+  }, "Last price (", h.currency, ")"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     value: h.lastPrice,
     onChange: e => set("lastPrice", Number(e.target.value) || 0)
-  }), /*#__PURE__*/React.createElement("p", {
+  }), React.createElement("p", {
     className: "pf-hint"
-  }, "Tap ", /*#__PURE__*/React.createElement("b", null, "Update prices"), " on the main screen to fill this in automatically, or type it yourself.", h.market === "lse" && /*#__PURE__*/React.createElement(React.Fragment, null, " ", "London ETFs list twice — a dollar line around 30–70 and a pence line in the thousands. You want the dollar one."))), h.mode === "deposit" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
+  }, "Tap ", React.createElement("b", null, "Update prices"), " on the main screen to fill this in automatically, or type it yourself.", h.market === "lse" && React.createElement(React.Fragment, null, " ", "London ETFs list twice — a dollar line around 30–70 and a pence line in the thousands. You want the dollar one."))), h.mode === "deposit" && React.createElement(React.Fragment, null, React.createElement("label", {
     className: "pf-lbl"
-  }, "Principal (SAR)"), /*#__PURE__*/React.createElement("input", {
+  }, "Principal (SAR)"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     value: h.principal,
     onChange: e => set("principal", Number(e.target.value) || 0)
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl"
-  }, "Annual rate — 5.2% is 5.2"), /*#__PURE__*/React.createElement("input", {
+  }, "Annual rate — 5.2% is 5.2"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     value: (h.rate * 100).toFixed(2),
     onChange: e => set("rate", (Number(e.target.value) || 0) / 100)
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl"
-  }, "Start date"), /*#__PURE__*/React.createElement("input", {
+  }, "Start date"), React.createElement("input", {
     className: "pf-in",
     type: "date",
     value: h.startDate,
     onChange: e => set("startDate", e.target.value)
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl"
-  }, "Term (months)"), /*#__PURE__*/React.createElement("input", {
+  }, "Term (months)"), React.createElement("input", {
     className: "pf-in",
     inputMode: "numeric",
     value: h.termMonths,
     onChange: e => set("termMonths", Number(e.target.value) || 60)
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl"
-  }, "Profit"), /*#__PURE__*/React.createElement("select", {
+  }, "Profit"), React.createElement("select", {
     className: "pf-in",
     value: h.payout,
     onChange: e => set("payout", e.target.value)
-  }, /*#__PURE__*/React.createElement("option", {
+  }, React.createElement("option", {
     value: "maturity"
-  }, "Rolls up until maturity"), /*#__PURE__*/React.createElement("option", {
+  }, "Rolls up until maturity"), React.createElement("option", {
     value: "periodic"
-  }, "Paid out to me as earned")), /*#__PURE__*/React.createElement("select", {
+  }, "Paid out to me as earned")), React.createElement("select", {
     className: "pf-in",
     value: h.accrual,
     onChange: e => set("accrual", e.target.value)
-  }, /*#__PURE__*/React.createElement("option", {
+  }, React.createElement("option", {
     value: "simple"
-  }, "Simple accrual"), /*#__PURE__*/React.createElement("option", {
+  }, "Simple accrual"), React.createElement("option", {
     value: "compound"
-  }, "Compounds monthly")), /*#__PURE__*/React.createElement("div", {
+  }, "Compounds monthly")), React.createElement("div", {
     className: "pf-calc"
-  }, "Worth today: ", /*#__PURE__*/React.createElement("b", null, sar(depositValue(h).value), " SAR"), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+  }, "Worth today: ", React.createElement("b", null, sar(depositValue(h).value), " SAR"), React.createElement("br", null), React.createElement("span", {
     className: "pf-dim2"
-  }, depositValue(h).note))), /*#__PURE__*/React.createElement("label", {
+  }, depositValue(h).note))), React.createElement("label", {
     className: "pf-lbl"
-  }, "What you put in (optional)"), /*#__PURE__*/React.createElement("input", {
+  }, "What you put in (optional)"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     placeholder: "for all-time return",
     value: h.costBasis ?? "",
     onChange: e => set("costBasis", e.target.value === "" ? null : Number(e.target.value))
-  }), /*#__PURE__*/React.createElement("div", {
+  }), React.createElement("div", {
     className: "pf-sheet-foot"
-  }, /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("button", {
     className: "pf-btn pf-btn-primary",
     onClick: () => onSave(h)
-  }, "Save"), /*#__PURE__*/React.createElement("button", {
+  }, "Save"), React.createElement("button", {
     className: "pf-btn pf-btn-danger",
     onClick: () => onDelete(h.id)
   }, "Delete"))));
 }
-
-/* ------------------------------------------------------------------ */
-/*  اليوم — وش طلع ووش نزل من آخر مرة فتحت التطبيق                    */
-/* ------------------------------------------------------------------ */
-
 function DailyMovers({
   snaps,
   holdings
@@ -1796,78 +1674,73 @@ function DailyMovers({
   const net = last.total - prev.total;
   const days = daysBetween(prev.date, last.date);
   const shown = open ? rows : [...up.slice(0, 3), ...down.slice(-3)];
-  return /*#__PURE__*/React.createElement("div", {
+  return React.createElement("div", {
     className: "pf-card",
     style: {
       marginTop: 14
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-mv-head"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", null, React.createElement("div", {
     className: "pf-lbl",
     style: {
       margin: 0
     }
-  }, days <= 1 ? "اليوم" : `آخر ${days} أيام`, " · منذ ", /*#__PURE__*/React.createElement("span", {
+  }, days <= 1 ? "Today" : `Last ${days} days`, " · since ", React.createElement("span", {
     dir: "ltr"
-  }, prev.date)), /*#__PURE__*/React.createElement("div", {
+  }, prev.date)), React.createElement("div", {
     className: "pf-mv-net",
     style: {
       color: tone(net)
     },
     dir: "ltr"
-  }, sar(net, true), " SAR")), /*#__PURE__*/React.createElement("div", {
+  }, sar(net, true), " SAR")), React.createElement("div", {
     className: "pf-mv-split"
-  }, /*#__PURE__*/React.createElement("span", {
+  }, React.createElement("span", {
     style: {
       color: "#1F6F5C"
     },
     dir: "ltr"
-  }, "▲ ", sar(sumUp)), /*#__PURE__*/React.createElement("span", {
+  }, "▲ ", sar(sumUp)), React.createElement("span", {
     style: {
       color: "#B24A38"
     },
     dir: "ltr"
-  }, "▼ ", sar(Math.abs(sumDown))))), shown.map(r => /*#__PURE__*/React.createElement("div", {
+  }, "▼ ", sar(Math.abs(sumDown))))), shown.map(r => React.createElement("div", {
     key: r.id,
     className: "pf-mv-row"
-  }, /*#__PURE__*/React.createElement("span", {
+  }, React.createElement("span", {
     className: "pf-mv-lbl"
-  }, r.label, /*#__PURE__*/React.createElement("small", null, r.bucket)), /*#__PURE__*/React.createElement("span", {
+  }, r.label, React.createElement("small", null, r.bucket)), React.createElement("span", {
     className: "pf-mv-bar"
-  }, /*#__PURE__*/React.createElement("i", {
+  }, React.createElement("i", {
     style: {
       width: `${Math.min(100, Math.abs(r.d) / Math.max(...rows.map(x => Math.abs(x.d))) * 100)}%`,
       background: tone(r.d),
       marginLeft: r.d < 0 ? "auto" : 0
     }
-  })), /*#__PURE__*/React.createElement("span", {
+  })), React.createElement("span", {
     className: "pf-mv-val",
     style: {
       color: tone(r.d)
     },
     dir: "ltr"
-  }, sar(r.d, true), /*#__PURE__*/React.createElement("small", null, pct(r.p))))), rows.length > shown.length && /*#__PURE__*/React.createElement("button", {
+  }, sar(r.d, true), React.createElement("small", null, pct(r.p))))), rows.length > shown.length && React.createElement("button", {
     className: "pf-btn-ghost",
     style: {
       marginTop: 6,
       fontSize: 12.5
     },
     onClick: () => setOpen(true)
-  }, "عرض الكل (", rows.length, ")"), open && /*#__PURE__*/React.createElement("button", {
+  }, "Show all (", rows.length, ")"), open && React.createElement("button", {
     className: "pf-btn-ghost",
     style: {
       marginTop: 6,
       fontSize: 12.5
     },
     onClick: () => setOpen(false)
-  }, "اختصار"));
+  }, "Show less"));
 }
-
-/* ------------------------------------------------------------------ */
-/*  تحديث سريع — كل الأرقام اللي ما تتحدث لحالها في شاشة وحدة        */
-/* ------------------------------------------------------------------ */
-
 function QuickUpdate({
   holdings,
   onApply,
@@ -1876,33 +1749,33 @@ function QuickUpdate({
   const manual = holdings.filter(h => h.mode === "manual" && !(Number(h.units) > 0));
   const [vals, setVals] = useState(() => Object.fromEntries(manual.map(h => [h.id, String(h.valueSar ?? "")])));
   const changed = manual.filter(h => Number(vals[h.id]) !== Number(h.valueSar));
-  return /*#__PURE__*/React.createElement("div", {
+  return React.createElement("div", {
     className: "pf-sheet-wrap",
     onClick: onClose
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-sheet",
     onClick: e => e.stopPropagation()
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-sheet-head"
-  }, /*#__PURE__*/React.createElement("b", null, "تحديث سريع"), /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("b", null, "Quick update"), React.createElement("button", {
     className: "pf-x",
     onClick: onClose
-  }, "✕")), /*#__PURE__*/React.createElement("p", {
+  }, "✕")), React.createElement("p", {
     className: "pf-hint",
     style: {
       marginTop: 10
     }
-  }, "هذي الأرقام ما لها مصدر تلقائي. افتح كل تطبيق وانقل الرقم. اللي ما تغيره يبقى مثل ما هو."), manual.map(h => /*#__PURE__*/React.createElement("div", {
+  }, "These figures have no automatic source. Open each app and copy the number across. Anything you leave alone stays as it is."), manual.map(h => React.createElement("div", {
     key: h.id
-  }, /*#__PURE__*/React.createElement("label", {
+  }, React.createElement("label", {
     className: "pf-lbl"
-  }, h.label, /*#__PURE__*/React.createElement("span", {
+  }, h.label, React.createElement("span", {
     style: {
       textTransform: "none",
       letterSpacing: 0,
       fontWeight: 400
     }
-  }, " ", "· آخر تحديث ", h.asOf ? daysBetween(h.asOf, today()) : "?", " يوم")), /*#__PURE__*/React.createElement("input", {
+  }, " ", "· updated ", h.asOf ? daysBetween(h.asOf, today()) : "?", " days ago")), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     dir: "ltr",
@@ -1911,82 +1784,67 @@ function QuickUpdate({
       ...p,
       [h.id]: e.target.value
     }))
-  }))), /*#__PURE__*/React.createElement("div", {
+  }))), React.createElement("div", {
     className: "pf-sheet-foot"
-  }, /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("button", {
     className: "pf-btn pf-btn-primary",
     disabled: !changed.length,
     onClick: () => onApply(Object.fromEntries(changed.map(h => [h.id, Number(vals[h.id]) || 0])))
-  }, "حفظ ", changed.length ? `(${changed.length})` : ""))));
+  }, "Save ", changed.length ? `(${changed.length})` : ""))));
 }
-
-/* ------------------------------------------------------------------ */
-/*  إيداع تمرا                                                          */
-/* ------------------------------------------------------------------ */
-
 function TamraDeposit({
   onApply,
   onClose
 }) {
   const [amount, setAmount] = useState("");
   const n = Number(amount) || 0;
-  return /*#__PURE__*/React.createElement("div", {
+  return React.createElement("div", {
     className: "pf-sheet-wrap",
     onClick: onClose
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-sheet",
     onClick: e => e.stopPropagation()
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-sheet-head"
-  }, /*#__PURE__*/React.createElement("b", null, "إيداع في تمرا"), /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("b", null, "Deposit into Tamra"), React.createElement("button", {
     className: "pf-x",
     onClick: onClose
-  }, "✕")), /*#__PURE__*/React.createElement("p", {
+  }, "✕")), React.createElement("p", {
     className: "pf-hint",
     style: {
       marginTop: 10
     }
-  }, "اكتب كم أودعت. نوزعه على الصناديق الست حسب أوزانها اليوم، ونحسب كم وحدة اشترى بسعر اليوم. بعدها يتحدث لحاله يومياً."), /*#__PURE__*/React.createElement("label", {
+  }, "Enter how much you deposited. It is split across the six ETFs by today's weights and converted to units at today's prices. From then on it updates daily by itself."), React.createElement("label", {
     className: "pf-lbl"
-  }, "المبلغ (ريال)"), /*#__PURE__*/React.createElement("input", {
+  }, "Amount (SAR)"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     placeholder: "3000",
     value: amount,
     onChange: e => setAmount(e.target.value)
-  }), /*#__PURE__*/React.createElement("div", {
+  }), React.createElement("div", {
     style: {
       display: "flex",
       gap: 6,
       marginTop: 8
     }
-  }, [1000, 3000, 5000].map(v => /*#__PURE__*/React.createElement("button", {
+  }, [1000, 3000, 5000].map(v => React.createElement("button", {
     key: v,
     className: "pf-btn",
     style: {
       flex: 1
     },
     onClick: () => setAmount(String(v))
-  }, v.toLocaleString()))), /*#__PURE__*/React.createElement("p", {
+  }, v.toLocaleString()))), React.createElement("p", {
     className: "pf-hint"
-  }, "هذا يفترض إنك أودعت اليوم بأسعار اليوم. لو الإيداع قديم، استخدم المزامنة بدلاً منه عشان تطابق رقم تمرا بالضبط."), /*#__PURE__*/React.createElement("div", {
+  }, "This assumes you deposited today at today's prices. For an older deposit, use Sync instead to match Tamra's exact figure."), React.createElement("div", {
     className: "pf-sheet-foot"
-  }, /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("button", {
     className: "pf-btn pf-btn-primary",
     disabled: n <= 0,
     onClick: () => onApply(n)
-  }, "أضف الإيداع"))));
+  }, "Add deposit"))));
 }
-
-/* ------------------------------------------------------------------ */
-/*  Tamra sync                                                         */
-/*                                                                     */
-/*  Tamra shows a weight per ETF, the amount invested and the profit —  */
-/*  not unit counts. But units follow from those: if the account is     */
-/*  worth X and SPUS is 30% of it, you hold X × 0.30 ÷ price units.     */
-/*  Derive them once and the position prices itself daily afterwards.   */
-/* ------------------------------------------------------------------ */
-
 function TamraSync({
   holdings,
   usdRate,
@@ -2015,56 +1873,56 @@ function TamraSync({
     }
     onApply(updates);
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return React.createElement("div", {
     className: "pf-sheet-wrap",
     onClick: onClose
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-sheet",
     onClick: e => e.stopPropagation()
-  }, /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("div", {
     className: "pf-sheet-head"
-  }, /*#__PURE__*/React.createElement("b", null, "Sync Tamra"), /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("b", null, "Sync Tamra"), React.createElement("button", {
     className: "pf-x",
     onClick: onClose
-  }, "✕")), /*#__PURE__*/React.createElement("p", {
+  }, "✕")), React.createElement("p", {
     className: "pf-hint",
     style: {
       marginTop: 10
     }
-  }, "Copy three things out of the Tamra app: what you've put in, your profit, and the weight of each ETF. That's enough to work out how many units you hold, after which this tracks the market on its own."), noPrice.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "Copy three things out of the Tamra app: what you've put in, your profit, and the weight of each ETF. That's enough to work out how many units you hold, after which this tracks the market on its own."), noPrice.length > 0 && React.createElement("div", {
     className: "pf-warn"
-  }, "No price yet for ", noPrice.map(e => e.symbol).join(", "), ". Close this and tap ", /*#__PURE__*/React.createElement("b", null, "Update prices"), " first — the units can't be worked out without them."), /*#__PURE__*/React.createElement("label", {
+  }, "No price yet for ", noPrice.map(e => e.symbol).join(", "), ". Close this and tap ", React.createElement("b", null, "Update prices"), " first — the units can't be worked out without them."), React.createElement("label", {
     className: "pf-lbl"
-  }, "Amount invested (SAR)"), /*#__PURE__*/React.createElement("input", {
+  }, "Amount invested (SAR)"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     placeholder: "what you've deposited",
     value: invested,
     onChange: e => setInvested(e.target.value)
-  }), /*#__PURE__*/React.createElement("label", {
+  }), React.createElement("label", {
     className: "pf-lbl"
-  }, "Profit (SAR)"), /*#__PURE__*/React.createElement("input", {
+  }, "Profit (SAR)"), React.createElement("input", {
     className: "pf-in",
     inputMode: "decimal",
     placeholder: "use a minus sign if it's down",
     value: profit,
     onChange: e => setProfit(e.target.value)
-  }), /*#__PURE__*/React.createElement("div", {
+  }), React.createElement("div", {
     className: "pf-calc"
-  }, "Account value: ", /*#__PURE__*/React.createElement("b", null, sar(value), " SAR")), /*#__PURE__*/React.createElement("label", {
+  }, "Account value: ", React.createElement("b", null, sar(value), " SAR")), React.createElement("label", {
     className: "pf-lbl"
-  }, "Weights — ", wSum.toFixed(1), "% of 100", wSum > 0 && Math.abs(wSum - 100) > 1.5 && /*#__PURE__*/React.createElement("span", {
+  }, "Weights — ", wSum.toFixed(1), "% of 100", wSum > 0 && Math.abs(wSum - 100) > 1.5 && React.createElement("span", {
     style: {
       color: "#B24A38",
       textTransform: "none",
       letterSpacing: 0
     }
-  }, " ", "· doesn't add up yet")), etfs.map(e => /*#__PURE__*/React.createElement("div", {
+  }, " ", "· doesn't add up yet")), etfs.map(e => React.createElement("div", {
     key: e.id,
     className: "pf-wrow"
-  }, /*#__PURE__*/React.createElement("span", {
+  }, React.createElement("span", {
     className: "pf-wname"
-  }, e.symbol), /*#__PURE__*/React.createElement("input", {
+  }, e.symbol), React.createElement("input", {
     className: "pf-in pf-win",
     inputMode: "decimal",
     placeholder: "0",
@@ -2073,25 +1931,22 @@ function TamraSync({
       ...p,
       [e.id]: ev.target.value
     }))
-  }), /*#__PURE__*/React.createElement("span", {
+  }), React.createElement("span", {
     className: "pf-wpct"
-  }, "%"), /*#__PURE__*/React.createElement("span", {
+  }, "%"), React.createElement("span", {
     className: "pf-wval"
-  }, sar(value * (Number(weights[e.id]) || 0) / 100)))), /*#__PURE__*/React.createElement("p", {
+  }, sar(value * (Number(weights[e.id]) || 0) / 100)))), React.createElement("p", {
     className: "pf-hint"
-  }, "Tamra rebalances and you may deposit more, so these units drift out of date. Sync again every month or so — and any time you add money."), /*#__PURE__*/React.createElement("div", {
+  }, "Tamra rebalances and you may deposit more, so these units drift out of date. Sync again every month or so — and any time you add money."), React.createElement("div", {
     className: "pf-sheet-foot"
-  }, /*#__PURE__*/React.createElement("button", {
+  }, React.createElement("button", {
     className: "pf-btn pf-btn-primary",
     disabled: !ready,
     onClick: apply
   }, "Work out my units"))));
 }
-
-/* ------------------------------------------------------------------ */
-
 function Style() {
-  return /*#__PURE__*/React.createElement("style", null, `
+  return React.createElement("style", null, `
       .pf-root{--ink:#141B2D;--gold:#C8A44D;--gain:#1F6F5C;--loss:#B24A38;
         --rail:#EDF0F3;--hair:#DCE1E7;--muted:#69707D;
         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
