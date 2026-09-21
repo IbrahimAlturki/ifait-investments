@@ -1,0 +1,31 @@
+name: Update prices
+
+on:
+  schedule:
+    # Every hour, on the hour (UTC).
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prices:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Fetch prices
+        run: node fetch-prices.mjs
+
+      - name: Commit prices.json
+        run: |
+          git config user.name  "price-bot"
+          git config user.email "actions@github.com"
+          git add prices.json
+          git diff --staged --quiet || git commit -m "Prices $(date -u +'%F %H:%M')"
+          git push
