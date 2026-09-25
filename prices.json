@@ -1,11 +1,11 @@
 {
-  "updated": "2026-09-24T21:58:00.484Z",
+  "updated": "2026-09-25T00:23:34.988Z",
   "note": "Public market prices only. No holdings or amounts.",
   "prices": {
-    "crypto:bitcoin": 84369,
-    "crypto:ethereum": 2687.81,
-    "crypto:tether": 0.999764,
-    "us:SPUS": 59.57,
+    "crypto:bitcoin": 84569,
+    "crypto:ethereum": 2691.52,
+    "crypto:tether": 0.999696,
+    "us:SPUS": 59.69,
     "us:GLD": 391.69,
     "us:SPRE": 19.3,
     "us:SPSK": 17.51,
