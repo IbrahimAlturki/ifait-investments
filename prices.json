@@ -1,11 +1,11 @@
 {
-  "updated": "2026-09-29T17:39:25.156Z",
+  "updated": "2026-09-29T21:52:40.246Z",
   "note": "Public market prices only. No holdings or amounts.",
   "prices": {
-    "us:SPUS": 59.52,
-    "us:GLD": 380.01,
-    "us:SPRE": 18.93,
-    "us:SPSK": 17.375,
+    "us:SPUS": 59.56,
+    "us:GLD": 382.89,
+    "us:SPRE": 19.03,
+    "us:SPSK": 17.37,
     "lse:ISDW.L": 69.71,
     "lse:ISDE.L": 36.89,
     "tadawul:1150": 24.3,
