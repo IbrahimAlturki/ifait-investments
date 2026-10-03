@@ -1,10 +1,10 @@
 {
-  "updated": "2026-10-03T19:45:59.185Z",
+  "updated": "2026-10-03T22:41:15.976Z",
   "note": "Public market prices only. No holdings or amounts.",
   "prices": {
-    "crypto:bitcoin": 84784,
-    "crypto:ethereum": 2683.04,
-    "crypto:tether": 0.999887,
+    "crypto:bitcoin": 84777,
+    "crypto:ethereum": 2687.71,
+    "crypto:tether": 0.999882,
     "us:SPUS": 60.33,
     "us:GLD": 380.14,
     "us:SPRE": 18.67,
@@ -17,12 +17,12 @@
     "tadawul:4013": 225.2,
     "tadawul:7202": 209.8,
     "tadawul:4263": 167.4,
-    "tadawul:ARC479": 9.64,
-    "tadawul:ARC518": 9.57,
-    "tadawul:ARC601": 9.74,
-    "tadawul:ARC470": 15.08,
-    "tadawul:ARC509": 11.74,
-    "tadawul:ARC371": 23.06,
+    "tadawul:ARC479": 9.62,
+    "tadawul:ARC518": 9.56,
+    "tadawul:ARC601": 9.72,
+    "tadawul:ARC470": 15.01,
+    "tadawul:ARC509": 11.71,
+    "tadawul:ARC371": 23.01,
     "tadawul:ARC510": 10.61
   }
 }
